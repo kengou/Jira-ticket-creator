@@ -65,18 +65,10 @@ linters:
   exclusions:
     generated: lax
 
-linters-settings:
 
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - bodyclose
-    - path: (.+)_test\.go$
-      linters:
-        - goconst
 
 formatters:
   enable:
