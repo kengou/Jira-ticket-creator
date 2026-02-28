@@ -44,10 +44,10 @@ func init() {
 // validateEpicsFlags checks that required flags for the epics command are set.
 func validateEpicsFlags() error {
 	if jiraURL == "" {
-		return fmt.Errorf("Jira URL is required (use --jira-url or set JIRA_URL)")
+		return fmt.Errorf("jira URL is required (use --jira-url or set JIRA_URL)")
 	}
 	if jiraToken == "" {
-		return fmt.Errorf("Jira token is required (use --token or set JIRA_TOKEN)")
+		return fmt.Errorf("jira token is required (use --token or set JIRA_TOKEN)")
 	}
 	if projectKey == "" {
 		return fmt.Errorf("project key is required (use -p or --project)")

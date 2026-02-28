@@ -449,12 +449,12 @@ func validateParentChild(parent, child config.Issue) error {
 	if strings.ToLower(child.IssueType) == "subtask" {
 		validParents := []string{"story", "task", "bug"}
 		if !slices.Contains(validParents, strings.ToLower(parent.IssueType)) {
-			return fmt.Errorf("Subtask can only have parent of type Story/Task/Bug, not %q", parent.IssueType)
+			return fmt.Errorf("subtask can only have parent of type Story/Task/Bug, not %q", parent.IssueType)
 		}
 	}
 
 	if strings.ToLower(parent.IssueType) == "subtask" {
-		return fmt.Errorf("Subtask cannot be a parent issue")
+		return fmt.Errorf("subtask cannot be a parent issue")
 	}
 
 	return nil

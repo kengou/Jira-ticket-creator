@@ -80,10 +80,10 @@ func validateFlags(needsAuth bool) error {
 
 	if needsAuth {
 		if jiraURL == "" {
-			return fmt.Errorf("Jira URL is required (use --jira-url or set JIRA_URL)")
+			return fmt.Errorf("jira URL is required (use --jira-url or set JIRA_URL)")
 		}
 		if jiraToken == "" {
-			return fmt.Errorf("Jira token is required (use --token or set JIRA_TOKEN)")
+			return fmt.Errorf("jira token is required (use --token or set JIRA_TOKEN)")
 		}
 	}
 
