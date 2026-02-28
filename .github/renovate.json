@@ -5,9 +5,6 @@
     "helpers:pinGitHubActionDigestsToSemver"
   ],
   "assigneesFromCodeOwners": true,
-  "constraints": {
-    "go": "1.25"
-  },
   "prConcurrentLimit": 3,
   "semanticCommits": true,
   "commitMessagePrefix": "chore(deps): ",
