@@ -9,7 +9,7 @@
     "go": "1.25"
   },
   "prConcurrentLimit": 3,
-  "semanticCommits": true,
+  "semanticCommits": "enabled",
   "commitMessagePrefix": "chore(deps): ",
   "separateMinorPatch": true,
   "postUpdateOptions": [
@@ -20,8 +20,12 @@
     {
       "groupName": "Github Actions",
       "groupSlug": "github-actions",
-      "matchManagers": ["github-actions"],
-      "extends": ["helpers:pinGitHubActionDigests"],
+      "matchManagers": [
+        "github-actions"
+      ],
+      "extends": [
+        "helpers:pinGitHubActionDigests"
+      ],
       "minimumReleaseAge": "7 days",
       "automerge": true,
       "automergeType": "pr",
@@ -30,8 +34,12 @@
     {
       "groupName": "Go dependencies (patch)",
       "groupSlug": "go-patch",
-      "matchDatasources": ["go"],
-      "matchUpdateTypes": ["patch"],
+      "matchDatasources": [
+        "go"
+      ],
+      "matchUpdateTypes": [
+        "patch"
+      ],
       "minimumReleaseAge": "14 days",
       "automerge": true,
       "automergeType": "pr",
@@ -40,15 +48,23 @@
     {
       "groupName": "Go dependencies (minor)",
       "groupSlug": "go-minor",
-      "matchDatasources": ["go"],
-      "matchUpdateTypes": ["minor"],
+      "matchDatasources": [
+        "go"
+      ],
+      "matchUpdateTypes": [
+        "minor"
+      ],
       "minimumReleaseAge": "14 days"
     },
     {
       "groupName": "Go dependencies (major)",
       "groupSlug": "go-major",
-      "matchDatasources": ["go"],
-      "matchUpdateTypes": ["major"],
+      "matchDatasources": [
+        "go"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
       "minimumReleaseAge": "14 days"
     }
   ]
