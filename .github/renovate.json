@@ -1,0 +1,55 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigestsToSemver"
+  ],
+  "assigneesFromCodeOwners": true,
+  "constraints": {
+    "go": "1.25"
+  },
+  "prConcurrentLimit": 3,
+  "semanticCommits": true,
+  "commitMessagePrefix": "chore(deps): ",
+  "separateMinorPatch": true,
+  "postUpdateOptions": [
+    "gomodTidy",
+    "gomodUpdateImportPaths"
+  ],
+  "packageRules": [
+    {
+      "groupName": "Github Actions",
+      "groupSlug": "github-actions",
+      "matchManagers": ["github-actions"],
+      "extends": ["helpers:pinGitHubActionDigests"],
+      "minimumReleaseAge": "7 days",
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash"
+    },
+    {
+      "groupName": "Go dependencies (patch)",
+      "groupSlug": "go-patch",
+      "matchDatasources": ["go"],
+      "matchUpdateTypes": ["patch"],
+      "minimumReleaseAge": "14 days",
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash"
+    },
+    {
+      "groupName": "Go dependencies (minor)",
+      "groupSlug": "go-minor",
+      "matchDatasources": ["go"],
+      "matchUpdateTypes": ["minor"],
+      "minimumReleaseAge": "14 days"
+    },
+    {
+      "groupName": "Go dependencies (major)",
+      "groupSlug": "go-major",
+      "matchDatasources": ["go"],
+      "matchUpdateTypes": ["major"],
+      "minimumReleaseAge": "14 days"
+    }
+  ]
+}

@@ -1,27 +1,88 @@
+# SPDX-License-Identifier: Apache-2.0
+
+version: '2'
+
 run:
   timeout: 5m
-  go: '1.25'
-
-output:
-  format: colored-line-number
-  print-issued-lines: true
-  print-linter-name: true
+  modules-download-mode: readonly
 
 linters:
+  default: none
   enable:
+    - bodyclose
+    - copyloopvar
+    - durationcheck
     - errcheck
+    - errname
+    - errorlint
+    - forbidigo
+    - goconst
     - gocritic
-    - gofmt
-    - goimports
-    - gosimple
+    - gosec
     - govet
     - ineffassign
     - misspell
-    - revive
+    - nilerr
+    - nolintlint
+    - perfsprint
     - staticcheck
-    - typecheck
+    - unconvert
     - unused
+    - usestdlibvars
+    - whitespace
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    goconst:
+      min-occurrences: 5
+    gocritic:
+      enabled-checks:
+        - boolExprSimplify
+        - emptyStringTest
+        - httpNoBody
+        - preferFilepathJoin
+        - redundantSprint
+        - stringConcatSimplify
+        - timeExprSimplify
+        - typeUnparen
+    gosec:
+      excludes:
+        - G112
+        - G306
+    nolintlint:
+      require-specific: true
+    usestdlibvars:
+      http-method: true
+      http-status-code: true
+      time-weekday: true
+      time-layout: true
+      crypto-hash: true
+    whitespace:
+      multi-func: true
+
+  exclusions:
+    generated: lax
+
+linters-settings:
 
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - bodyclose
+    - path: (.+)_test\.go$
+      linters:
+        - goconst
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/kengou/Jira-ticket-creator
