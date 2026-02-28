@@ -64,5 +64,16 @@
       ],
       "minimumReleaseAge": "14 days"
     }
+  ],
+  "regexManagers": [
+    {
+      "fileMatch": ["^\\.github/workflows/lint.yml$"],
+      "matchStrings": [
+        "version: v?(?<currentValue>[0-9.]+)"
+      ],
+      "depNameTemplate": "golangci/golangci-lint",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "loose"
+    }
   ]
 }
