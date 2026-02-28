@@ -38,11 +38,12 @@ type IssueRecord struct {
 	ConfigFile string    `json:"configFile"`
 }
 
-// Load loads state from disk, looking for the state file next to the given
-// configFile path. If configFile is empty, it falls back to the current
-// working directory. Returns a new empty state if the file doesn't exist.
+// Load loads state from disk. The state file is always placed in the current
+// working directory, so running from the project root always uses the same
+// state regardless of where the config file lives. Returns a new empty state
+// if the file doesn't exist.
 func Load(projectKey, configFile string) (*State, error) {
-	statePath := statePathFor(configFile)
+	statePath := statePathFor()
 
 	if _, err := os.Stat(statePath); os.IsNotExist(err) {
 		return &State{
@@ -154,9 +155,10 @@ func (s *State) Clear() error {
 	return os.Remove(s.savePath)
 }
 
-// ClearForConfig removes the state file next to the given config file.
+// ClearForConfig removes the state file in the current working directory.
+// The configFile argument is ignored; it is kept for API compatibility.
 func ClearForConfig(configFile string) error {
-	statePath := statePathFor(configFile)
+	statePath := statePathFor()
 	if _, err := os.Stat(statePath); os.IsNotExist(err) {
 		return nil
 	}
@@ -168,18 +170,10 @@ func (s *State) Path() string {
 	return s.savePath
 }
 
-// statePathFor returns the state file path for a given config file.
-// The state file is placed next to the YAML config file so that re-running
-// the same config from any working directory finds the same state.
-// Falls back to the current working directory if configFile is empty.
-func statePathFor(configFile string) string {
-	if configFile != "" {
-		absConfig, err := filepath.Abs(configFile)
-		if err == nil {
-			return filepath.Join(filepath.Dir(absConfig), stateFileName)
-		}
-	}
-
+// statePathFor returns the state file path in the current working directory.
+// Keeping state in cwd (typically the project root) ensures a single unified
+// state file regardless of where config YAML files are located within the repo.
+func statePathFor() string {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return stateFileName

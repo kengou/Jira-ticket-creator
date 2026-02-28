@@ -104,53 +104,58 @@ func TestLoad_CorruptedFile(t *testing.T) {
 	})
 }
 
-func TestLoad_WithConfigFile_PlacesStateNextToYAML(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "my-config.yaml")
-	os.WriteFile(configPath, []byte(""), 0644)
+func TestLoad_WithConfigFile_PlacesStateInCwd(t *testing.T) {
+	withTempDir(t, func(_ string) {
+		// Config lives in a completely different directory
+		configPath := filepath.Join(t.TempDir(), "my-config.yaml")
 
-	st, err := Load("PROJ", configPath)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if st.Path() != filepath.Join(dir, stateFileName) {
-		t.Errorf("Path() = %q, want state file next to config in %q", st.Path(), dir)
-	}
+		st, err := Load("PROJ", configPath)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// State must always land in cwd, not next to the config file.
+		// Use os.Getwd() for the expected path to match symlink resolution.
+		actualCwd, _ := os.Getwd()
+		wantPath := filepath.Join(actualCwd, stateFileName)
+		if st.Path() != wantPath {
+			t.Errorf("Path() = %q, want state file in cwd %q", st.Path(), wantPath)
+		}
+	})
 }
 
 func TestLoad_WithConfigFile_ReadsExistingState(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "my-config.yaml")
-	os.WriteFile(configPath, []byte(""), 0644)
+	withTempDir(t, func(cwd string) {
+		// Config lives elsewhere; state is read from cwd
+		configPath := filepath.Join(t.TempDir(), "my-config.yaml")
 
-	// Write a state file next to the config
-	existing := &State{
-		IssueMapping: map[string]IssueRecord{
-			"task-1": {
-				JiraKey:    "PROJ-1",
-				InternalID: "task-1",
-				IssueType:  "Task",
-				Summary:    "A task",
-				CreatedAt:  time.Now().Add(-time.Hour),
-				ConfigFile: "my-config.yaml",
+		existing := &State{
+			IssueMapping: map[string]IssueRecord{
+				"task-1": {
+					JiraKey:    "PROJ-1",
+					InternalID: "task-1",
+					IssueType:  "Task",
+					Summary:    "A task",
+					CreatedAt:  time.Now().Add(-time.Hour),
+					ConfigFile: "my-config.yaml",
+				},
 			},
-		},
-		UpdatedAt:  time.Now().Add(-time.Hour),
-		ProjectKey: "PROJ",
-	}
-	writeStateFile(t, dir, existing)
+			UpdatedAt:  time.Now().Add(-time.Hour),
+			ProjectKey: "PROJ",
+		}
+		writeStateFile(t, cwd, existing) // write to cwd, not config dir
 
-	st, err := Load("PROJ", configPath)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if st.Count() != 1 {
-		t.Fatalf("Count() = %d, want 1", st.Count())
-	}
-	key, ok := st.GetJiraKey("task-1")
-	if !ok || key != "PROJ-1" {
-		t.Errorf("GetJiraKey(task-1) = (%q, %v), want (PROJ-1, true)", key, ok)
-	}
+		st, err := Load("PROJ", configPath)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if st.Count() != 1 {
+			t.Fatalf("Count() = %d, want 1", st.Count())
+		}
+		key, ok := st.GetJiraKey("task-1")
+		if !ok || key != "PROJ-1" {
+			t.Errorf("GetJiraKey(task-1) = (%q, %v), want (PROJ-1, true)", key, ok)
+		}
+	})
 }
 
 // --- Save ---
@@ -202,25 +207,27 @@ func TestSave_UpdatesTimestamp(t *testing.T) {
 	})
 }
 
-func TestSave_NextToConfigFile(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "my-config.yaml")
+func TestSave_WritesToCwd(t *testing.T) {
+	withTempDir(t, func(cwd string) {
+		// Config lives in a different directory
+		configPath := filepath.Join(t.TempDir(), "my-config.yaml")
 
-	st, err := Load("PROJ", configPath)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	st.AddIssue("task-1", "PROJ-1", "Task", "Task", "", "my-config.yaml")
+		st, err := Load("PROJ", configPath)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		st.AddIssue("task-1", "PROJ-1", "Task", "Task", "", "my-config.yaml")
 
-	if err := st.Save(); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
+		if err := st.Save(); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
 
-	// Verify state file is next to the config
-	statePath := filepath.Join(dir, stateFileName)
-	if _, err := os.Stat(statePath); err != nil {
-		t.Fatalf("state file should exist at %s: %v", statePath, err)
-	}
+		// State file must be in cwd, not next to the config
+		statePath := filepath.Join(cwd, stateFileName)
+		if _, err := os.Stat(statePath); err != nil {
+			t.Fatalf("state file should exist in cwd at %s: %v", statePath, err)
+		}
+	})
 }
 
 // --- AddIssue / GetJiraKey / GetRecord / HasIssue ---
@@ -361,40 +368,44 @@ func TestClear_NoErrorWhenFileDoesNotExist(t *testing.T) {
 }
 
 func TestClearForConfig_RemovesFile(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.yaml")
+	withTempDir(t, func(cwd string) {
+		configPath := filepath.Join(t.TempDir(), "config.yaml")
 
-	st, err := Load("PROJ", configPath)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if err := st.Save(); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
+		st, err := Load("PROJ", configPath)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if err := st.Save(); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
 
-	if err := ClearForConfig(configPath); err != nil {
-		t.Fatalf("ClearForConfig: %v", err)
-	}
+		if err := ClearForConfig(configPath); err != nil {
+			t.Fatalf("ClearForConfig: %v", err)
+		}
 
-	statePath := filepath.Join(dir, stateFileName)
-	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
-		t.Error("state file should be removed after ClearForConfig")
-	}
+		statePath := filepath.Join(cwd, stateFileName)
+		if _, err := os.Stat(statePath); !os.IsNotExist(err) {
+			t.Error("state file should be removed after ClearForConfig")
+		}
+	})
 }
 
 // --- Path ---
 
 func TestPath_ReturnsResolvedPath(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.yaml")
+	withTempDir(t, func(_ string) {
+		configPath := filepath.Join(t.TempDir(), "config.yaml")
 
-	st, err := Load("PROJ", configPath)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if st.Path() != filepath.Join(dir, stateFileName) {
-		t.Errorf("Path() = %q, want %q", st.Path(), filepath.Join(dir, stateFileName))
-	}
+		st, err := Load("PROJ", configPath)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		actualCwd, _ := os.Getwd()
+		wantPath := filepath.Join(actualCwd, stateFileName)
+		if st.Path() != wantPath {
+			t.Errorf("Path() = %q, want %q", st.Path(), wantPath)
+		}
+	})
 }
 
 // --- GetStatePath (deprecated compat) ---
@@ -409,90 +420,92 @@ func TestGetStatePath_ContainsFileName(t *testing.T) {
 // --- Round-trip: Load -> modify -> Save -> Load ---
 
 func TestRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.yaml")
+	withTempDir(t, func(_ string) {
+		configPath := filepath.Join(t.TempDir(), "config.yaml")
 
-	// Load fresh
-	st, err := Load("PROJ", configPath)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+		// Load fresh
+		st, err := Load("PROJ", configPath)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
 
-	// Add issues
-	st.AddIssue("epic-1", "PROJ-1", "Epic", "Epic 1", "", "config.yaml")
-	st.AddIssue("story-1", "PROJ-2", "Story", "Story 1", "PROJ-1", "config.yaml")
+		// Add issues
+		st.AddIssue("epic-1", "PROJ-1", "Epic", "Epic 1", "", "config.yaml")
+		st.AddIssue("story-1", "PROJ-2", "Story", "Story 1", "PROJ-1", "config.yaml")
 
-	// Save
-	if err := st.Save(); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
+		// Save
+		if err := st.Save(); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
 
-	// Reload
-	st2, err := Load("PROJ", configPath)
-	if err != nil {
-		t.Fatalf("Load after Save: %v", err)
-	}
+		// Reload
+		st2, err := Load("PROJ", configPath)
+		if err != nil {
+			t.Fatalf("Load after Save: %v", err)
+		}
 
-	if st2.Count() != 2 {
-		t.Errorf("Count after reload = %d, want 2", st2.Count())
-	}
+		if st2.Count() != 2 {
+			t.Errorf("Count after reload = %d, want 2", st2.Count())
+		}
 
-	key, ok := st2.GetJiraKey("epic-1")
-	if !ok || key != "PROJ-1" {
-		t.Errorf("GetJiraKey(epic-1) = (%q, %v), want (PROJ-1, true)", key, ok)
-	}
+		key, ok := st2.GetJiraKey("epic-1")
+		if !ok || key != "PROJ-1" {
+			t.Errorf("GetJiraKey(epic-1) = (%q, %v), want (PROJ-1, true)", key, ok)
+		}
 
-	// Verify epic link is persisted
-	storyRecord := st2.IssueMapping["story-1"]
-	if storyRecord.EpicLink != "PROJ-1" {
-		t.Errorf("story-1 EpicLink = %q, want PROJ-1", storyRecord.EpicLink)
-	}
-	epicRecord := st2.IssueMapping["epic-1"]
-	if epicRecord.EpicLink != "" {
-		t.Errorf("epic-1 EpicLink = %q, want empty", epicRecord.EpicLink)
-	}
+		// Verify epic link is persisted
+		storyRecord := st2.IssueMapping["story-1"]
+		if storyRecord.EpicLink != "PROJ-1" {
+			t.Errorf("story-1 EpicLink = %q, want PROJ-1", storyRecord.EpicLink)
+		}
+		epicRecord := st2.IssueMapping["epic-1"]
+		if epicRecord.EpicLink != "" {
+			t.Errorf("epic-1 EpicLink = %q, want empty", epicRecord.EpicLink)
+		}
+	})
 }
 
 func TestRoundTrip_Idempotency(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.yaml")
+	withTempDir(t, func(_ string) {
+		configPath := filepath.Join(t.TempDir(), "config.yaml")
 
-	// First run: create and save
-	st, err := Load("PROJ", configPath)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	st.AddIssue("epic-1", "PROJ-1", "Epic", "My Epic", "", "config.yaml")
-	st.AddIssue("story-1", "PROJ-2", "Story", "My Story", "", "config.yaml")
-	if err := st.Save(); err != nil {
-		t.Fatalf("Save: %v", err)
-	}
+		// First run: create and save
+		st, err := Load("PROJ", configPath)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		st.AddIssue("epic-1", "PROJ-1", "Epic", "My Epic", "", "config.yaml")
+		st.AddIssue("story-1", "PROJ-2", "Story", "My Story", "", "config.yaml")
+		if err := st.Save(); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
 
-	// Second run: load and check
-	st2, err := Load("PROJ", configPath)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+		// Second run: load and check
+		st2, err := Load("PROJ", configPath)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
 
-	// Simulate what the applier does on re-run
-	record, ok := st2.GetRecord("epic-1")
-	if !ok {
-		t.Fatal("epic-1 should exist in state")
-	}
-	if record.JiraKey != "PROJ-1" {
-		t.Errorf("JiraKey = %q, want PROJ-1", record.JiraKey)
-	}
-	if record.Summary != "My Epic" {
-		t.Errorf("Summary = %q, want 'My Epic'", record.Summary)
-	}
+		// Simulate what the applier does on re-run
+		record, ok := st2.GetRecord("epic-1")
+		if !ok {
+			t.Fatal("epic-1 should exist in state")
+		}
+		if record.JiraKey != "PROJ-1" {
+			t.Errorf("JiraKey = %q, want PROJ-1", record.JiraKey)
+		}
+		if record.Summary != "My Epic" {
+			t.Errorf("Summary = %q, want 'My Epic'", record.Summary)
+		}
 
-	record2, ok := st2.GetRecord("story-1")
-	if !ok {
-		t.Fatal("story-1 should exist in state")
-	}
-	if record2.JiraKey != "PROJ-2" {
-		t.Errorf("JiraKey = %q, want PROJ-2", record2.JiraKey)
-	}
+		record2, ok := st2.GetRecord("story-1")
+		if !ok {
+			t.Fatal("story-1 should exist in state")
+		}
+		if record2.JiraKey != "PROJ-2" {
+			t.Errorf("JiraKey = %q, want PROJ-2", record2.JiraKey)
+		}
+	})
 }
 
 // --- helpers ---
