@@ -65,9 +65,12 @@
       "minimumReleaseAge": "14 days"
     }
   ],
-  "regexManagers": [
+  "customManagers": [
     {
-      "fileMatch": ["^\\.github/workflows/lint.yml$"],
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/lint.yml$/"
+      ],
       "matchStrings": [
         "version: v?(?<currentValue>[0-9.]+)"
       ],
