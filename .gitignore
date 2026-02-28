@@ -1,0 +1,50 @@
+# Ignore the state file
+.jira-ai-creator-state.json
+
+# Build and dist directories
+bin/
+dist/
+build/
+tickets/
+docs/
+.archive/
+
+# IDE and Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Go-specific
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Test binaries
+*.test
+
+# Coverage
+*.out
+coverage.html
+
+# Dependency directories
+vendor/
+
+# Go module cache
+go.sum.bak
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Log files
+*.log
+*.tmp
+*.bak
