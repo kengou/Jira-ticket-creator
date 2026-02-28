@@ -3,6 +3,14 @@ name: Docker Build
 on:
   push:
     tags: [ 'v*' ]
+    paths:
+      - 'Dockerfile'
+      - '.github/workflows/docker.yml'
+      - 'cmd/**'
+      - 'internal/**'
+      - '*.go'
+      - 'go.mod'
+      - 'go.sum'
 
 jobs:
   docker:

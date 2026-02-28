@@ -3,8 +3,24 @@ name: Lint
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - '*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.golangci.yml'
+      - '.github/workflows/lint.yml'
   pull_request:
     branches: [ main ]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - '*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - '.golangci.yml'
+      - '.github/workflows/lint.yml'
 
 permissions:
   contents: read
