@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+//
 // Package jira provides a client for the Jira REST API.
 package jira
 

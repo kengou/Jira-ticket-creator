@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+//
 // jira-ai-creator creates Jira issues from YAML configuration files.
 package main
 

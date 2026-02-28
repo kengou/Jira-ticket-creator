@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+//
 // Package state provides persistent state tracking for idempotent issue creation.
 package state
 

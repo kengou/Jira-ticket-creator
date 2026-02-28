@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+//
 // Package cmd implements the CLI commands for jira-ai-creator.
 package cmd
 

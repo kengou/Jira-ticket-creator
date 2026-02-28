@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+//
 // Package apply orchestrates issue creation in Jira.
 package apply
 
