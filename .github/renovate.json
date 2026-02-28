@@ -65,15 +65,19 @@
       "minimumReleaseAge": "14 days"
     }
   ],
-  "regexManagers": [
+  "customManagers": [
     {
-      "fileMatch": ["^\\.github/workflows/lint.yml$"],
-      "matchStrings": [
-        "version: v?(?<currentValue>[0-9.]+)"
+      "customType": "regex",
+      "description": "Bump golangci-lint version in the Makefile",
+      "managerFilePatterns": [
+        "/^Makefile$/"
       ],
+      "matchStrings": [
+        "GOLINT_VERSION\\s*\\?=\\s*(?<currentValue>.?(?:\\d+\\.){0,2}\\d+)"
+      ],
+      "datasourceTemplate": "github-tags",
       "depNameTemplate": "golangci/golangci-lint",
-      "datasourceTemplate": "github-releases",
-      "versioningTemplate": "loose"
+      "extractVersionTemplate": "^v(?<version>.*)$"
     }
   ]
 }

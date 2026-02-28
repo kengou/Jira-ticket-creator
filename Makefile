@@ -26,9 +26,19 @@ test:
 vet:
 	$(GO) vet ./...
 
-## lint: run staticcheck (install with: go install honnef.co/go/tools/cmd/staticcheck@latest)
-lint: vet
-	@command -v staticcheck >/dev/null 2>&1 && staticcheck ./... || echo "staticcheck not installed — skipping (install: go install honnef.co/go/tools/cmd/staticcheck@latest)"
+BINDIR ?= $(shell pwd)/bin
+GOLINT_VERSION ?= 1.54.2
+GOLINT ?= $(BINDIR)/golangci-lint
+
+$(BINDIR):
+	mkdir -p $(BINDIR)
+
+$(GOLINT): $(BINDIR)
+	GOBIN=$(BINDIR) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v$(GOLINT_VERSION)
+
+## lint: always run golangci-lint (installs if missing)
+lint: vet $(GOLINT)
+	$(GOLINT) run --timeout=5m
 
 ## validate: run vet, lint, and tests
 validate: vet lint test
