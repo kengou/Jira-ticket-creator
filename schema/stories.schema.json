@@ -129,16 +129,6 @@
           "type": "boolean",
           "default": false,
           "description": "Continue creating issues even if one fails"
-        },
-        "dryRun": {
-          "type": "boolean",
-          "default": false,
-          "description": "Simulate without making API calls"
-        },
-        "verbose": {
-          "type": "boolean",
-          "default": false,
-          "description": "Enable verbose output"
         }
       }
     },
@@ -228,11 +218,6 @@
           "additionalProperties": { "type": "string" },
           "description": "Variables for description template"
         },
-        "attachments": {
-          "type": "array",
-          "items": { "$ref": "#/definitions/Attachment" },
-          "description": "Files to attach to the issue"
-        },
         "metadata": {
           "type": "object",
           "description": "Arbitrary metadata (not sent to Jira)",
@@ -268,23 +253,6 @@
         }
       }
     },
-    "Attachment": {
-      "type": "object",
-      "description": "A file attachment",
-      "required": ["path"],
-      "additionalProperties": false,
-      "properties": {
-        "path": {
-          "type": "string",
-          "description": "Path to the file",
-          "minLength": 1
-        },
-        "description": {
-          "type": "string",
-          "description": "Optional description of the attachment"
-        }
-      }
-    }
   }
 }
 

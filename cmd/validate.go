@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -417,8 +418,13 @@ func printSummary(cfg *config.Config) {
 	for _, issue := range cfg.Issues {
 		typeCounts[issue.IssueType]++
 	}
-	for t, count := range typeCounts {
-		fmt.Printf("    - %s: %d\n", t, count)
+	keys := make([]string, 0, len(typeCounts))
+	for t := range typeCounts {
+		keys = append(keys, t)
+	}
+	sort.Strings(keys)
+	for _, t := range keys {
+		fmt.Printf("    - %s: %d\n", t, typeCounts[t])
 	}
 }
 

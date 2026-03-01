@@ -1,12 +1,32 @@
 package apply
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/kengou/Jira-ticket-creator/internal/config"
 	"github.com/kengou/Jira-ticket-creator/internal/jira"
 )
+
+// mockClient implements JiraClient for testing.
+type mockClient struct {
+	createIssueFn     func(*jira.CreateIssueRequest) (*jira.CreateIssueResponse, error)
+	createIssueLinkFn func(*jira.IssueLinkRequest) error
+	fetchLinkTypesFn  func() ([]jira.IssueLinkTypeInfo, error)
+}
+
+func (m *mockClient) CreateIssue(r *jira.CreateIssueRequest) (*jira.CreateIssueResponse, error) {
+	return m.createIssueFn(r)
+}
+
+func (m *mockClient) CreateIssueLink(r *jira.IssueLinkRequest) error {
+	return m.createIssueLinkFn(r)
+}
+
+func (m *mockClient) FetchIssueLinkTypes() ([]jira.IssueLinkTypeInfo, error) {
+	return m.fetchLinkTypesFn()
+}
 
 // --- BuildDependencyGraph ---
 
@@ -921,6 +941,262 @@ func TestIsEpic_EmptyConfig(t *testing.T) {
 	}
 	if a.isEpic("anything") {
 		t.Error("isEpic should return false when no issues in config")
+	}
+}
+
+// --- createIssueLinks ---
+
+func TestCreateIssueLinks_NoLinks(t *testing.T) {
+	a := &Applier{
+		config: &config.Config{
+			Issues: []config.Issue{
+				{ID: "S1", Summary: "Story 1"},
+			},
+		},
+		createdIssues: map[string]string{"S1": "PROJ-1"},
+	}
+	if err := a.createIssueLinks(); err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+}
+
+func TestCreateIssueLinks_DryRun(t *testing.T) {
+	fetchCalled := false
+	linkCalled := false
+	mc := &mockClient{
+		fetchLinkTypesFn: func() ([]jira.IssueLinkTypeInfo, error) {
+			fetchCalled = true
+			return nil, nil
+		},
+		createIssueLinkFn: func(*jira.IssueLinkRequest) error {
+			linkCalled = true
+			return nil
+		},
+	}
+	a := &Applier{
+		config: &config.Config{
+			Issues: []config.Issue{
+				{ID: "S1", Summary: "S1", Links: []config.IssueLink{{Type: "blocks", Target: "S2"}}},
+				{ID: "S2", Summary: "S2"},
+			},
+		},
+		client:        mc,
+		dryRun:        true,
+		createdIssues: map[string]string{"S1": "PROJ-1", "S2": "PROJ-2"},
+	}
+	if err := a.createIssueLinks(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fetchCalled {
+		t.Error("FetchIssueLinkTypes should NOT be called in dry-run")
+	}
+	if linkCalled {
+		t.Error("CreateIssueLink should NOT be called in dry-run")
+	}
+}
+
+func TestCreateIssueLinks_Success(t *testing.T) {
+	var capturedReq *jira.IssueLinkRequest
+	mc := &mockClient{
+		fetchLinkTypesFn: func() ([]jira.IssueLinkTypeInfo, error) {
+			return []jira.IssueLinkTypeInfo{
+				{ID: "1", Name: "Blocks", Inward: "is blocked by", Outward: "blocks"},
+			}, nil
+		},
+		createIssueLinkFn: func(r *jira.IssueLinkRequest) error {
+			capturedReq = r
+			return nil
+		},
+	}
+	a := &Applier{
+		config: &config.Config{
+			Issues: []config.Issue{
+				{ID: "S1", Summary: "S1", Links: []config.IssueLink{{Type: "blocks", Target: "S2"}}},
+				{ID: "S2", Summary: "S2"},
+			},
+		},
+		client:        mc,
+		createdIssues: map[string]string{"S1": "PROJ-1", "S2": "PROJ-2"},
+	}
+	if err := a.createIssueLinks(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedReq == nil {
+		t.Fatal("CreateIssueLink was not called")
+	}
+	if capturedReq.Type.Name != "Blocks" {
+		t.Errorf("link type name = %q, want Blocks", capturedReq.Type.Name)
+	}
+	// "blocks" matched via outward → source is outward, target is inward
+	if capturedReq.OutwardIssue.Key != "PROJ-1" {
+		t.Errorf("outward = %q, want PROJ-1", capturedReq.OutwardIssue.Key)
+	}
+	if capturedReq.InwardIssue.Key != "PROJ-2" {
+		t.Errorf("inward = %q, want PROJ-2", capturedReq.InwardIssue.Key)
+	}
+}
+
+func TestCreateIssueLinks_TargetIsJiraKey(t *testing.T) {
+	var capturedReq *jira.IssueLinkRequest
+	mc := &mockClient{
+		fetchLinkTypesFn: func() ([]jira.IssueLinkTypeInfo, error) {
+			return []jira.IssueLinkTypeInfo{
+				{ID: "1", Name: "Relates", Inward: "relates to", Outward: "relates to"},
+			}, nil
+		},
+		createIssueLinkFn: func(r *jira.IssueLinkRequest) error {
+			capturedReq = r
+			return nil
+		},
+	}
+	a := &Applier{
+		config: &config.Config{
+			Issues: []config.Issue{
+				{ID: "S1", Summary: "S1", Links: []config.IssueLink{{Type: "relates to", Target: "EXT-999"}}},
+			},
+		},
+		client:        mc,
+		createdIssues: map[string]string{"S1": "PROJ-1"},
+		// EXT-999 is not in createdIssues but is a valid Jira key
+	}
+	if err := a.createIssueLinks(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if capturedReq == nil {
+		t.Fatal("CreateIssueLink was not called")
+	}
+	// EXT-999 should be used directly as the target
+	if capturedReq.InwardIssue.Key != "EXT-999" && capturedReq.OutwardIssue.Key != "EXT-999" {
+		t.Errorf("EXT-999 not used as link target; inward=%q outward=%q",
+			capturedReq.InwardIssue.Key, capturedReq.OutwardIssue.Key)
+	}
+}
+
+func TestCreateIssueLinks_TargetNotCreated(t *testing.T) {
+	mc := &mockClient{
+		fetchLinkTypesFn: func() ([]jira.IssueLinkTypeInfo, error) {
+			return []jira.IssueLinkTypeInfo{
+				{ID: "1", Name: "Blocks", Inward: "is blocked by", Outward: "blocks"},
+			}, nil
+		},
+		createIssueLinkFn: func(*jira.IssueLinkRequest) error {
+			return nil
+		},
+	}
+	a := &Applier{
+		config: &config.Config{
+			Issues: []config.Issue{
+				{ID: "S1", Summary: "S1", Links: []config.IssueLink{{Type: "blocks", Target: "MISSING"}}},
+			},
+		},
+		client:        mc,
+		createdIssues: map[string]string{"S1": "PROJ-1"},
+		// MISSING is not in createdIssues and not a Jira key
+	}
+	// Should warn but return nil (not an error)
+	if err := a.createIssueLinks(); err != nil {
+		t.Fatalf("expected nil error for uncreated non-jira target, got %v", err)
+	}
+}
+
+func TestCreateIssueLinks_ResolveFails(t *testing.T) {
+	mc := &mockClient{
+		fetchLinkTypesFn: func() ([]jira.IssueLinkTypeInfo, error) {
+			return []jira.IssueLinkTypeInfo{
+				{ID: "1", Name: "Blocks", Inward: "is blocked by", Outward: "blocks"},
+			}, nil
+		},
+		createIssueLinkFn: func(*jira.IssueLinkRequest) error {
+			return nil
+		},
+	}
+	a := &Applier{
+		config: &config.Config{
+			Issues: []config.Issue{
+				{ID: "S1", Summary: "S1", Links: []config.IssueLink{{Type: "nonexistent-type", Target: "S2"}}},
+				{ID: "S2", Summary: "S2"},
+			},
+		},
+		client:        mc,
+		createdIssues: map[string]string{"S1": "PROJ-1", "S2": "PROJ-2"},
+	}
+	err := a.createIssueLinks()
+	if err == nil {
+		t.Fatal("expected error for unknown link type, got nil")
+	}
+	if !strings.Contains(err.Error(), "nonexistent-type") {
+		t.Errorf("error %q should mention unknown link type", err.Error())
+	}
+}
+
+func TestCreateIssueLinks_APIFails(t *testing.T) {
+	apiErr := errors.New("API error 500")
+	mc := &mockClient{
+		fetchLinkTypesFn: func() ([]jira.IssueLinkTypeInfo, error) {
+			return []jira.IssueLinkTypeInfo{
+				{ID: "1", Name: "Blocks", Inward: "is blocked by", Outward: "blocks"},
+			}, nil
+		},
+		createIssueLinkFn: func(*jira.IssueLinkRequest) error {
+			return apiErr
+		},
+	}
+	a := &Applier{
+		config: &config.Config{
+			Issues: []config.Issue{
+				{ID: "S1", Summary: "S1", Links: []config.IssueLink{{Type: "blocks", Target: "S2"}}},
+				{ID: "S2", Summary: "S2"},
+			},
+		},
+		client:        mc,
+		createdIssues: map[string]string{"S1": "PROJ-1", "S2": "PROJ-2"},
+	}
+	err := a.createIssueLinks()
+	if err == nil {
+		t.Fatal("expected error from CreateIssueLink, got nil")
+	}
+	if !strings.Contains(err.Error(), "API error 500") {
+		t.Errorf("error %q should contain API error message", err.Error())
+	}
+}
+
+func TestCreateIssueLinks_MultipleErrors(t *testing.T) {
+	callCount := 0
+	mc := &mockClient{
+		fetchLinkTypesFn: func() ([]jira.IssueLinkTypeInfo, error) {
+			return []jira.IssueLinkTypeInfo{
+				{ID: "1", Name: "Blocks", Inward: "is blocked by", Outward: "blocks"},
+			}, nil
+		},
+		createIssueLinkFn: func(*jira.IssueLinkRequest) error {
+			callCount++
+			return errors.New("link failed")
+		},
+	}
+	a := &Applier{
+		config: &config.Config{
+			Issues: []config.Issue{
+				{ID: "S1", Summary: "S1", Links: []config.IssueLink{
+					{Type: "blocks", Target: "S2"},
+					{Type: "blocks", Target: "S3"},
+				}},
+				{ID: "S2", Summary: "S2"},
+				{ID: "S3", Summary: "S3"},
+			},
+		},
+		client:        mc,
+		createdIssues: map[string]string{"S1": "PROJ-1", "S2": "PROJ-2", "S3": "PROJ-3"},
+	}
+	err := a.createIssueLinks()
+	if err == nil {
+		t.Fatal("expected joined error, got nil")
+	}
+	if callCount != 2 {
+		t.Errorf("CreateIssueLink called %d times, want 2", callCount)
+	}
+	// errors.Join produces a multi-line error; both "link failed" should appear
+	if strings.Count(err.Error(), "link failed") < 2 {
+		t.Errorf("expected both errors in joined result, got: %v", err)
 	}
 }
 

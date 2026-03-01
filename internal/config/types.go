@@ -46,10 +46,8 @@ type Validation struct {
 
 // Options controls execution behavior.
 type Options struct {
-	DryRun             bool  `yaml:"dryRun,omitempty"`
 	ContinueOnError    bool  `yaml:"continueOnError,omitempty"`
 	IdempotencyEnabled *bool `yaml:"idempotencyEnabled,omitempty"`
-	Verbose            bool  `yaml:"verbose,omitempty"`
 }
 
 // IsIdempotencyEnabled returns whether idempotency is enabled (defaults to true).

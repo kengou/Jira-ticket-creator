@@ -142,12 +142,17 @@ func (a *Applier) createIssue(issue *config.Issue, index, total int) (bool, erro
 	if a.state != nil {
 		if existing, ok := a.state.GetRecord(issue.ID); ok {
 			// Internal ID matches — check if summary also matches
-			if existing.Summary == issue.Summary {
-				fmt.Printf("  ⏭️  Already exists: %s — %s (skipping)\n", existing.JiraKey, existing.Summary)
+			if existing.Summary != issue.Summary {
+				fmt.Printf("  ⏭️  Already exists: %s — skipping creation, updating local state\n", existing.JiraKey)
+				fmt.Printf("      summary: %q -> %q\n", existing.Summary, issue.Summary)
+				configFileName := filepath.Base(a.configFile)
+				a.state.AddIssue(issue.ID, existing.JiraKey, issue.IssueType, issue.Summary,
+					existing.EpicLink, configFileName)
+				if err := a.state.Save(); err != nil {
+					fmt.Printf("      ⚠️  Warning: failed to update state: %v\n", err)
+				}
 			} else {
-				fmt.Printf("  ⏭️  Already exists: %s (skipping)\n", existing.JiraKey)
-				fmt.Printf("      ⚠️  Summary changed: %q -> %q (state not updated)\n",
-					existing.Summary, issue.Summary)
+				fmt.Printf("  ⏭️  Already exists: %s — %s (skipping)\n", existing.JiraKey, existing.Summary)
 			}
 			a.createdIssues[issue.ID] = existing.JiraKey
 			return true, nil
@@ -257,7 +262,8 @@ func (a *Applier) buildIssueFields(issue *config.Issue) (map[string]any, error) 
 	if issue.Parent != "" {
 		parentKey, ok := a.createdIssues[issue.Parent]
 		if !ok {
-			return nil, fmt.Errorf("parent %q not yet created", issue.Parent)
+			return nil, fmt.Errorf("issue %q: parent %q not in dependency order or not yet created",
+				issue.ID, issue.Parent)
 		}
 		if a.isEpic(issue.Parent) {
 			// Parent is an Epic → use epic link custom field
