@@ -64,12 +64,9 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&isCloud, "cloud", false, "Use Jira Cloud API (v3) instead of Data Center (v2)")
 }
 
-// maskToken redacts a token for safe logging, showing only first 4 chars.
-func maskToken(token string) string {
-	if len(token) <= 4 {
-		return "****"
-	}
-	return token[:4] + "****"
+// maskToken redacts a token for safe logging.
+func maskToken(_ string) string {
+	return "****"
 }
 
 // requireAuth checks that Jira authentication flags are set.

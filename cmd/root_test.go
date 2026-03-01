@@ -6,38 +6,12 @@ import (
 
 // --- maskToken ---
 
-func TestMaskToken_LongToken(t *testing.T) {
-	got := maskToken("abcdefgh12345678")
-	if got != "abcd****" {
-		t.Errorf("maskToken = %q, want %q", got, "abcd****")
-	}
-}
-
-func TestMaskToken_ShortToken(t *testing.T) {
-	got := maskToken("abc")
-	if got != "****" {
-		t.Errorf("maskToken = %q, want %q", got, "****")
-	}
-}
-
-func TestMaskToken_ExactlyFourChars(t *testing.T) {
-	got := maskToken("abcd")
-	if got != "****" {
-		t.Errorf("maskToken = %q, want %q", got, "****")
-	}
-}
-
-func TestMaskToken_FiveChars(t *testing.T) {
-	got := maskToken("abcde")
-	if got != "abcd****" {
-		t.Errorf("maskToken = %q, want %q", got, "abcd****")
-	}
-}
-
-func TestMaskToken_Empty(t *testing.T) {
-	got := maskToken("")
-	if got != "****" {
-		t.Errorf("maskToken = %q, want %q", got, "****")
+func TestMaskToken(t *testing.T) {
+	cases := []string{"", "abc", "abcd", "abcde", "abcdefgh12345678"}
+	for _, token := range cases {
+		if got := maskToken(token); got != "****" {
+			t.Errorf("maskToken(%q) = %q, want %q", token, got, "****")
+		}
 	}
 }
 
