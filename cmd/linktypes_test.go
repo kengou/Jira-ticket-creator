@@ -24,7 +24,7 @@ func TestValidateLinkTypesFlags_NoToken(t *testing.T) {
 	origToken := jiraToken
 	defer func() { jiraURL = origURL; jiraToken = origToken }()
 
-	jiraURL = "https://jira.example.com"
+	jiraURL = testJiraURL
 	jiraToken = ""
 
 	if err := validateLinkTypesFlags(); err == nil {
@@ -37,7 +37,7 @@ func TestValidateLinkTypesFlags_OK(t *testing.T) {
 	origToken := jiraToken
 	defer func() { jiraURL = origURL; jiraToken = origToken }()
 
-	jiraURL = "https://jira.example.com"
+	jiraURL = testJiraURL
 	jiraToken = "tok"
 
 	if err := validateLinkTypesFlags(); err != nil {

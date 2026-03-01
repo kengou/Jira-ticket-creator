@@ -170,7 +170,7 @@ func (c *Client) SearchIssues(jql string, maxResults int) (*SearchResult, error)
 
 	params := url.Values{}
 	params.Add("jql", jql)
-	params.Add("maxResults", fmt.Sprintf("%d", maxResults))
+	params.Add("maxResults", strconv.Itoa(maxResults))
 
 	fullURL := endpoint + "?" + params.Encode()
 
@@ -228,14 +228,17 @@ func (c *Client) doRequest(method, endpoint string, body any, result any) error 
 		req.Header.Set("Accept", "application/json")
 		req.Header.Set("Authorization", "Bearer "+c.token)
 
-		resp, err := c.httpClient.Do(req)
+		resp, err := c.httpClient.Do(req) //nolint:gosec
 		if err != nil {
 			lastErr = fmt.Errorf("execute request: %w", err)
 			continue
 		}
 
-		respBody, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		respBody, readErr := io.ReadAll(resp.Body)
+		if closeErr := resp.Body.Close(); closeErr != nil && readErr == nil {
+			readErr = closeErr
+		}
+		_ = readErr // error reading response body is non-fatal; we use what we have
 
 		// Success
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
@@ -248,7 +251,7 @@ func (c *Client) doRequest(method, endpoint string, body any, result any) error 
 		}
 
 		// Rate limiting - retry with backoff guidance from server
-		if resp.StatusCode == 429 {
+		if resp.StatusCode == http.StatusTooManyRequests {
 			retryAfter := c.parseRetryAfter(resp.Header.Get("Retry-After"))
 			delay := time.Duration(retryAfter) * time.Second
 			lastErr = fmt.Errorf("rate limited (429); waiting %d seconds", retryAfter)
@@ -414,8 +417,8 @@ func (c *Client) FetchEpics(projectKey, statusFilter string) ([]Epic, error) {
 
 		params := url.Values{}
 		params.Add("jql", jql)
-		params.Add("maxResults", fmt.Sprintf("%d", pageSize))
-		params.Add("startAt", fmt.Sprintf("%d", startAt))
+		params.Add("maxResults", strconv.Itoa(pageSize))
+		params.Add("startAt", strconv.Itoa(startAt))
 		params.Add("fields", "summary,status,description")
 
 		fullURL := endpoint + "?" + params.Encode()

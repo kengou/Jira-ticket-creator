@@ -8,6 +8,7 @@ build/
 tickets/
 docs/
 .archive/
+.claude/
 
 # IDE and Editor
 .idea/

@@ -2,12 +2,14 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
-	"github.com/kengou/Jira-ticket-creator/internal/jira"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
+
+	"github.com/kengou/Jira-ticket-creator/internal/jira"
 )
 
 var projectKey string
@@ -38,19 +40,21 @@ func init() {
 	epicsCmd.Flags().StringVarP(&projectKey, "project", "p", "", "Jira project key (required)")
 	epicsCmd.Flags().StringVarP(&epicStatus, "status", "s", "", "Filter by status (e.g. \"In Progress\", \"NOT:Done\" to negate)")
 	epicsCmd.Flags().StringVarP(&epicsOutputFile, "output", "o", "", "Save epics to a YAML file (jira-ai-creator schema format)")
-	epicsCmd.MarkFlagRequired("project")
+	if err := epicsCmd.MarkFlagRequired("project"); err != nil {
+		panic(err)
+	}
 }
 
 // validateEpicsFlags checks that required flags for the epics command are set.
 func validateEpicsFlags() error {
 	if jiraURL == "" {
-		return fmt.Errorf("jira URL is required (use --jira-url or set JIRA_URL)")
+		return errors.New("jira URL is required (use --jira-url or set JIRA_URL)")
 	}
 	if jiraToken == "" {
-		return fmt.Errorf("jira token is required (use --token or set JIRA_TOKEN)")
+		return errors.New("jira token is required (use --token or set JIRA_TOKEN)")
 	}
 	if projectKey == "" {
-		return fmt.Errorf("project key is required (use -p or --project)")
+		return errors.New("project key is required (use -p or --project)")
 	}
 	return nil
 }

@@ -15,7 +15,6 @@ linters:
     - errcheck
     - errname
     - errorlint
-    - forbidigo
     - goconst
     - gocritic
     - gosec

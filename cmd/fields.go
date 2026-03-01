@@ -2,11 +2,13 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/kengou/Jira-ticket-creator/internal/jira"
 	"github.com/spf13/cobra"
+
+	"github.com/kengou/Jira-ticket-creator/internal/jira"
 )
 
 var (
@@ -48,10 +50,10 @@ func init() {
 // validateFieldsFlags checks that required flags for the fields command are set.
 func validateFieldsFlags() error {
 	if jiraURL == "" {
-		return fmt.Errorf("jira URL is required (use --jira-url or set JIRA_URL)")
+		return errors.New("jira URL is required (use --jira-url or set JIRA_URL)")
 	}
 	if jiraToken == "" {
-		return fmt.Errorf("jira token is required (use --token or set JIRA_TOKEN)")
+		return errors.New("jira token is required (use --token or set JIRA_TOKEN)")
 	}
 	return nil
 }

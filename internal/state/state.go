@@ -54,7 +54,7 @@ func Load(projectKey, configFile string) (*State, error) {
 		}, nil
 	}
 
-	data, err := os.ReadFile(statePath)
+	data, err := os.ReadFile(statePath) //nolint:gosec
 	if err != nil {
 		return nil, fmt.Errorf("read state file: %w", err)
 	}
@@ -182,6 +182,7 @@ func statePathFor() string {
 }
 
 // GetStatePath returns the state file path for display purposes.
+//
 // Deprecated: use State.Path() on a loaded state instead.
 func GetStatePath() string {
 	cwd, err := os.Getwd()

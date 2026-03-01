@@ -112,16 +112,17 @@ func (a *Applier) Apply() error {
 
 	// Summary
 	createdCount := len(a.createdIssues) - skippedCount
-	if skippedCount > 0 && failedCount > 0 {
+	switch {
+	case skippedCount > 0 && failedCount > 0:
 		fmt.Printf("\n⚠️  Created %d, skipped %d (already exist), failed %d of %d issues\n",
 			createdCount, skippedCount, failedCount, len(ordered))
-	} else if skippedCount > 0 {
+	case skippedCount > 0:
 		fmt.Printf("\n✅ Created %d, skipped %d (already exist) of %d issues\n",
 			createdCount, skippedCount, len(ordered))
-	} else if failedCount > 0 {
+	case failedCount > 0:
 		fmt.Printf("\n⚠️  Created %d of %d issues (%d failed)\n",
 			createdCount, len(ordered), failedCount)
-	} else {
+	default:
 		fmt.Printf("\n✅ Successfully created %d issues!\n", createdCount)
 	}
 	return nil
@@ -162,7 +163,7 @@ func (a *Applier) createIssue(issue *config.Issue, index, total int) (bool, erro
 	// Dry run
 	if a.dryRun {
 		fmt.Printf("  🔍 [DRY RUN] Would create issue with %d fields\n", len(fields))
-		a.createdIssues[issue.ID] = fmt.Sprintf("DRY-RUN-%s", issue.ID)
+		a.createdIssues[issue.ID] = "DRY-RUN-" + issue.ID
 		return false, nil
 	}
 

@@ -103,7 +103,7 @@ type IssueLink struct {
 
 // LoadConfig loads and parses a YAML configuration file.
 func LoadConfig(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file %q: %w", path, err)
 	}

@@ -2,13 +2,15 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
 	"strings"
 
-	"github.com/kengou/Jira-ticket-creator/internal/config"
 	"github.com/spf13/cobra"
+
+	"github.com/kengou/Jira-ticket-creator/internal/config"
 )
 
 // ValidationError represents a single validation error.
@@ -114,7 +116,7 @@ func validateSchema(cfg *config.Config) []ValidationError {
 	} else if cfg.SchemaVersion != "1.0" {
 		errors = append(errors, ValidationError{
 			Field:    "schemaVersion",
-			Message:  fmt.Sprintf("unsupported schema version: %s", cfg.SchemaVersion),
+			Message:  "unsupported schema version: " + cfg.SchemaVersion,
 			Severity: "warning",
 		})
 	}
@@ -369,7 +371,7 @@ func checkCircularDependencies(issues []config.Issue) []ValidationError {
 			errors = append(errors, ValidationError{
 				IssueID:  id,
 				Field:    "dependsOn",
-				Message:  fmt.Sprintf("circular dependency detected: %s", strings.Join(cycle, " → ")),
+				Message:  "circular dependency detected: " + strings.Join(cycle, " → "),
 				Severity: "error",
 			})
 			return true
@@ -454,7 +456,7 @@ func validateParentChild(parent, child config.Issue) error {
 	}
 
 	if strings.ToLower(parent.IssueType) == "subtask" {
-		return fmt.Errorf("subtask cannot be a parent issue")
+		return errors.New("subtask cannot be a parent issue")
 	}
 
 	return nil

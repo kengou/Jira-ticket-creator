@@ -2,12 +2,14 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+
+	"github.com/spf13/cobra"
 
 	"github.com/kengou/Jira-ticket-creator/internal/apply"
 	"github.com/kengou/Jira-ticket-creator/internal/config"
 	"github.com/kengou/Jira-ticket-creator/internal/jira"
-	"github.com/spf13/cobra"
 )
 
 var applyCmd = &cobra.Command{
@@ -55,9 +57,9 @@ func runApply() error {
 	}
 
 	// Validate
-	errors := validateConfig(cfg)
+	errs := validateConfig(cfg)
 	hasErrors := false
-	for _, e := range errors {
+	for _, e := range errs {
 		if e.Severity == "error" {
 			if !hasErrors {
 				fmt.Println("❌ Configuration has validation errors:")
@@ -67,12 +69,12 @@ func runApply() error {
 		}
 	}
 	if hasErrors {
-		return fmt.Errorf("cannot apply due to validation errors")
+		return errors.New("cannot apply due to validation errors")
 	}
 
 	// Print warnings
 	hasWarnings := false
-	for _, e := range errors {
+	for _, e := range errs {
 		if e.Severity == "warning" {
 			if !hasWarnings {
 				fmt.Println("⚠️  Warnings:")

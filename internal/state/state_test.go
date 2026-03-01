@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+const testJiraKey = "PROJ-1"
+
 // withTempDir runs fn inside a temporary directory (sets CWD and restores it).
 func withTempDir(t *testing.T, fn func(dir string)) {
 	t.Helper()
@@ -19,7 +21,11 @@ func withTempDir(t *testing.T, fn func(dir string)) {
 	if err := os.Chdir(dir); err != nil {
 		t.Fatalf("chdir: %v", err)
 	}
-	t.Cleanup(func() { os.Chdir(orig) })
+	t.Cleanup(func() {
+		if err := os.Chdir(orig); err != nil {
+			t.Logf("chdir: %v", err)
+		}
+	})
 	fn(dir)
 }
 
@@ -48,7 +54,7 @@ func TestLoad_ReadsExistingState(t *testing.T) {
 		existing := &State{
 			IssueMapping: map[string]IssueRecord{
 				"task-1": {
-					JiraKey:    "PROJ-1",
+					JiraKey:    testJiraKey,
 					InternalID: "task-1",
 					IssueType:  "Task",
 					Summary:    "A task",
@@ -69,7 +75,7 @@ func TestLoad_ReadsExistingState(t *testing.T) {
 			t.Fatalf("Count() = %d, want 1", st.Count())
 		}
 		key, ok := st.GetJiraKey("task-1")
-		if !ok || key != "PROJ-1" {
+		if !ok || key != testJiraKey {
 			t.Errorf("GetJiraKey(task-1) = (%q, %v), want (PROJ-1, true)", key, ok)
 		}
 	})
@@ -115,7 +121,10 @@ func TestLoad_WithConfigFile_PlacesStateInCwd(t *testing.T) {
 		}
 		// State must always land in cwd, not next to the config file.
 		// Use os.Getwd() for the expected path to match symlink resolution.
-		actualCwd, _ := os.Getwd()
+		actualCwd, err := os.Getwd()
+		if err != nil {
+			t.Fatalf("getwd: %v", err)
+		}
 		wantPath := filepath.Join(actualCwd, stateFileName)
 		if st.Path() != wantPath {
 			t.Errorf("Path() = %q, want state file in cwd %q", st.Path(), wantPath)
@@ -131,7 +140,7 @@ func TestLoad_WithConfigFile_ReadsExistingState(t *testing.T) {
 		existing := &State{
 			IssueMapping: map[string]IssueRecord{
 				"task-1": {
-					JiraKey:    "PROJ-1",
+					JiraKey:    testJiraKey,
 					InternalID: "task-1",
 					IssueType:  "Task",
 					Summary:    "A task",
@@ -152,7 +161,7 @@ func TestLoad_WithConfigFile_ReadsExistingState(t *testing.T) {
 			t.Fatalf("Count() = %d, want 1", st.Count())
 		}
 		key, ok := st.GetJiraKey("task-1")
-		if !ok || key != "PROJ-1" {
+		if !ok || key != testJiraKey {
 			t.Errorf("GetJiraKey(task-1) = (%q, %v), want (PROJ-1, true)", key, ok)
 		}
 	})
@@ -173,7 +182,7 @@ func TestSave_WritesFile(t *testing.T) {
 		}
 
 		// Verify file exists and is valid JSON
-		data, err := os.ReadFile(filepath.Join(dir, stateFileName))
+		data, err := os.ReadFile(filepath.Join(dir, stateFileName)) //nolint:gosec
 		if err != nil {
 			t.Fatalf("read state file: %v", err)
 		}
@@ -216,7 +225,7 @@ func TestSave_WritesToCwd(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
-		st.AddIssue("task-1", "PROJ-1", "Task", "Task", "", "my-config.yaml")
+		st.AddIssue("task-1", testJiraKey, "Task", "Task", "", "my-config.yaml")
 
 		if err := st.Save(); err != nil {
 			t.Fatalf("Save: %v", err)
@@ -276,7 +285,7 @@ func TestGetRecord_NotFound(t *testing.T) {
 
 func TestHasIssue(t *testing.T) {
 	st := &State{IssueMapping: make(map[string]IssueRecord)}
-	st.AddIssue("task-1", "PROJ-1", "Task", "Task", "", "config.yaml")
+	st.AddIssue("task-1", testJiraKey, "Task", "Task", "", "config.yaml")
 
 	if !st.HasIssue("task-1") {
 		t.Error("HasIssue should return true for existing issue")
@@ -293,7 +302,7 @@ func TestListIssues_SortedByCreationTime(t *testing.T) {
 
 	now := time.Now()
 	st.IssueMapping["b"] = IssueRecord{JiraKey: "PROJ-2", InternalID: "b", CreatedAt: now.Add(time.Minute)}
-	st.IssueMapping["a"] = IssueRecord{JiraKey: "PROJ-1", InternalID: "a", CreatedAt: now}
+	st.IssueMapping["a"] = IssueRecord{JiraKey: testJiraKey, InternalID: "a", CreatedAt: now}
 	st.IssueMapping["c"] = IssueRecord{JiraKey: "PROJ-3", InternalID: "c", CreatedAt: now.Add(2 * time.Minute)}
 
 	issues := st.ListIssues()
@@ -400,7 +409,10 @@ func TestPath_ReturnsResolvedPath(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
-		actualCwd, _ := os.Getwd()
+		actualCwd, err := os.Getwd()
+		if err != nil {
+			t.Fatalf("getwd: %v", err)
+		}
 		wantPath := filepath.Join(actualCwd, stateFileName)
 		if st.Path() != wantPath {
 			t.Errorf("Path() = %q, want %q", st.Path(), wantPath)
@@ -430,8 +442,8 @@ func TestRoundTrip(t *testing.T) {
 		}
 
 		// Add issues
-		st.AddIssue("epic-1", "PROJ-1", "Epic", "Epic 1", "", "config.yaml")
-		st.AddIssue("story-1", "PROJ-2", "Story", "Story 1", "PROJ-1", "config.yaml")
+		st.AddIssue("epic-1", testJiraKey, "Epic", "Epic 1", "", "config.yaml")
+		st.AddIssue("story-1", "PROJ-2", "Story", "Story 1", testJiraKey, "config.yaml")
 
 		// Save
 		if err := st.Save(); err != nil {
@@ -449,13 +461,13 @@ func TestRoundTrip(t *testing.T) {
 		}
 
 		key, ok := st2.GetJiraKey("epic-1")
-		if !ok || key != "PROJ-1" {
+		if !ok || key != testJiraKey {
 			t.Errorf("GetJiraKey(epic-1) = (%q, %v), want (PROJ-1, true)", key, ok)
 		}
 
 		// Verify epic link is persisted
 		storyRecord := st2.IssueMapping["story-1"]
-		if storyRecord.EpicLink != "PROJ-1" {
+		if storyRecord.EpicLink != testJiraKey {
 			t.Errorf("story-1 EpicLink = %q, want PROJ-1", storyRecord.EpicLink)
 		}
 		epicRecord := st2.IssueMapping["epic-1"]
@@ -474,7 +486,7 @@ func TestRoundTrip_Idempotency(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
-		st.AddIssue("epic-1", "PROJ-1", "Epic", "My Epic", "", "config.yaml")
+		st.AddIssue("epic-1", testJiraKey, "Epic", "My Epic", "", "config.yaml")
 		st.AddIssue("story-1", "PROJ-2", "Story", "My Story", "", "config.yaml")
 		if err := st.Save(); err != nil {
 			t.Fatalf("Save: %v", err)
@@ -491,7 +503,7 @@ func TestRoundTrip_Idempotency(t *testing.T) {
 		if !ok {
 			t.Fatal("epic-1 should exist in state")
 		}
-		if record.JiraKey != "PROJ-1" {
+		if record.JiraKey != testJiraKey {
 			t.Errorf("JiraKey = %q, want PROJ-1", record.JiraKey)
 		}
 		if record.Summary != "My Epic" {

@@ -4,8 +4,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kengou/Jira-ticket-creator/internal/jira"
 	"gopkg.in/yaml.v3"
+
+	"github.com/kengou/Jira-ticket-creator/internal/jira"
+)
+
+const (
+	testJiraURL    = "https://jira.example.com"
+	testJiraToken  = "my-token"
+	testProjectKey = "PROJ"
 )
 
 // --- validateEpicsFlags ---
@@ -22,9 +29,9 @@ func TestValidateEpicsFlags_AllPresent(t *testing.T) {
 		epicStatus = origStatus
 	}()
 
-	jiraURL = "https://jira.example.com"
-	jiraToken = "my-token"
-	projectKey = "PROJ"
+	jiraURL = testJiraURL
+	jiraToken = testJiraToken
+	projectKey = testProjectKey
 	epicStatus = ""
 
 	if err := validateEpicsFlags(); err != nil {
@@ -44,9 +51,9 @@ func TestValidateEpicsFlags_WithStatus(t *testing.T) {
 		epicStatus = origStatus
 	}()
 
-	jiraURL = "https://jira.example.com"
-	jiraToken = "my-token"
-	projectKey = "PROJ"
+	jiraURL = testJiraURL
+	jiraToken = testJiraToken
+	projectKey = testProjectKey
 	epicStatus = "In Progress"
 
 	if err := validateEpicsFlags(); err != nil {
@@ -67,8 +74,8 @@ func TestValidateEpicsFlags_MissingURL(t *testing.T) {
 	}()
 
 	jiraURL = ""
-	jiraToken = "my-token"
-	projectKey = "PROJ"
+	jiraToken = testJiraToken
+	projectKey = testProjectKey
 
 	if err := validateEpicsFlags(); err == nil {
 		t.Fatal("expected error for missing URL")
@@ -87,9 +94,9 @@ func TestValidateEpicsFlags_MissingToken(t *testing.T) {
 		epicStatus = origStatus
 	}()
 
-	jiraURL = "https://jira.example.com"
+	jiraURL = testJiraURL
 	jiraToken = ""
-	projectKey = "PROJ"
+	projectKey = testProjectKey
 
 	if err := validateEpicsFlags(); err == nil {
 		t.Fatal("expected error for missing token")
@@ -108,8 +115,8 @@ func TestValidateEpicsFlags_MissingProjectKey(t *testing.T) {
 		epicStatus = origStatus
 	}()
 
-	jiraURL = "https://jira.example.com"
-	jiraToken = "my-token"
+	jiraURL = testJiraURL
+	jiraToken = testJiraToken
 	projectKey = ""
 
 	if err := validateEpicsFlags(); err == nil {
@@ -125,7 +132,7 @@ func TestEpicsToYAML_BasicOutput(t *testing.T) {
 		{Key: "PROJ-2", Summary: "Epic Two", Status: "In Progress", Description: "Description of epic two."},
 	}
 
-	data, err := epicsToYAML("PROJ", epics)
+	data, err := epicsToYAML(testProjectKey, epics)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -164,7 +171,7 @@ func TestEpicsToYAML_BasicOutput(t *testing.T) {
 	if cfg.SchemaVersion != "1.0" {
 		t.Errorf("schemaVersion = %q, want %q", cfg.SchemaVersion, "1.0")
 	}
-	if cfg.Defaults.ProjectKey != "PROJ" {
+	if cfg.Defaults.ProjectKey != testProjectKey {
 		t.Errorf("defaults.projectKey = %q, want %q", cfg.Defaults.ProjectKey, "PROJ")
 	}
 	if len(cfg.Issues) != 2 {
@@ -185,7 +192,7 @@ func TestEpicsToYAML_BasicOutput(t *testing.T) {
 }
 
 func TestEpicsToYAML_EmptyEpics(t *testing.T) {
-	data, err := epicsToYAML("PROJ", []jira.Epic{})
+	data, err := epicsToYAML(testProjectKey, []jira.Epic{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -198,7 +205,7 @@ func TestEpicsToYAML_EmptyEpics(t *testing.T) {
 	if len(cfg.Issues) != 0 {
 		t.Errorf("len(issues) = %d, want 0", len(cfg.Issues))
 	}
-	if cfg.Defaults.ProjectKey != "PROJ" {
+	if cfg.Defaults.ProjectKey != testProjectKey {
 		t.Errorf("defaults.projectKey = %q, want %q", cfg.Defaults.ProjectKey, "PROJ")
 	}
 }
@@ -208,7 +215,7 @@ func TestEpicsToYAML_NoDescription(t *testing.T) {
 		{Key: "PROJ-10", Summary: "Epic Without Description", Status: "Done"},
 	}
 
-	data, err := epicsToYAML("PROJ", epics)
+	data, err := epicsToYAML(testProjectKey, epics)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -236,7 +243,7 @@ func TestEpicsToYAML_MultilineDescription(t *testing.T) {
 		{Key: "PROJ-5", Summary: "Epic With Multiline", Status: "Open", Description: desc},
 	}
 
-	data, err := epicsToYAML("PROJ", epics)
+	data, err := epicsToYAML(testProjectKey, epics)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

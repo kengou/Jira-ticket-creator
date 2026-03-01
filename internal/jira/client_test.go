@@ -11,10 +11,12 @@ import (
 	"time"
 )
 
+const testBaseURL = "https://jira.example.com"
+
 // --- NewClient ---
 
 func TestNewClient_DataCenter(t *testing.T) {
-	c := NewClient("https://jira.example.com", "my-token", false)
+	c := NewClient(testBaseURL, "my-token", false)
 	if c.apiVersion != "2" {
 		t.Errorf("apiVersion = %q, want %q for Data Center", c.apiVersion, "2")
 	}
@@ -34,7 +36,7 @@ func TestNewClient_Cloud(t *testing.T) {
 }
 
 func TestNewClient_WithOptions(t *testing.T) {
-	c := NewClient("https://jira.example.com", "tok", false,
+	c := NewClient(testBaseURL, "tok", false,
 		WithMaxRetries(5),
 		WithTimeout(60*time.Second),
 	)
@@ -50,14 +52,14 @@ func TestNewClient_WithOptions(t *testing.T) {
 
 func TestNormalizeURL_AddsScheme(t *testing.T) {
 	got := normalizeURL("jira.example.com")
-	if got != "https://jira.example.com" {
+	if got != testBaseURL {
 		t.Errorf("normalizeURL('jira.example.com') = %q, want 'https://jira.example.com'", got)
 	}
 }
 
 func TestNormalizeURL_PreservesHTTPS(t *testing.T) {
-	got := normalizeURL("https://jira.example.com")
-	if got != "https://jira.example.com" {
+	got := normalizeURL(testBaseURL)
+	if got != testBaseURL {
 		t.Errorf("normalizeURL('https://jira.example.com') = %q", got)
 	}
 }
@@ -70,22 +72,22 @@ func TestNormalizeURL_PreservesHTTP(t *testing.T) {
 }
 
 func TestNormalizeURL_StripsTrailingSlash(t *testing.T) {
-	got := normalizeURL("https://jira.example.com/")
-	if got != "https://jira.example.com" {
+	got := normalizeURL(testBaseURL + "/")
+	if got != testBaseURL {
 		t.Errorf("normalizeURL('https://jira.example.com/') = %q", got)
 	}
 }
 
 func TestNormalizeURL_StripsMultipleTrailingSlashes(t *testing.T) {
-	got := normalizeURL("https://jira.example.com///")
-	if got != "https://jira.example.com" {
+	got := normalizeURL(testBaseURL + "///")
+	if got != testBaseURL {
 		t.Errorf("normalizeURL('https://jira.example.com///') = %q", got)
 	}
 }
 
 func TestNormalizeURL_NoSchemeWithTrailingSlash(t *testing.T) {
 	got := normalizeURL("jira.example.com/")
-	if got != "https://jira.example.com" {
+	if got != testBaseURL {
 		t.Errorf("normalizeURL('jira.example.com/') = %q", got)
 	}
 }
@@ -106,7 +108,7 @@ func TestNormalizeURL_WhitespaceOnly(t *testing.T) {
 
 func TestNormalizeURL_TrimsWhitespace(t *testing.T) {
 	got := normalizeURL("  jira.example.com  ")
-	if got != "https://jira.example.com" {
+	if got != testBaseURL {
 		t.Errorf("normalizeURL('  jira.example.com  ') = %q", got)
 	}
 }
@@ -128,7 +130,7 @@ func TestNormalizeURL_WithPort(t *testing.T) {
 func TestNewClient_NormalizesURL(t *testing.T) {
 	// Verify that NewClient applies normalizeURL to the base URL
 	c := NewClient("jira.example.com/", "token", false)
-	if c.baseURL != "https://jira.example.com" {
+	if c.baseURL != testBaseURL {
 		t.Errorf("NewClient baseURL = %q, want 'https://jira.example.com'", c.baseURL)
 	}
 }
@@ -291,7 +293,7 @@ func TestCreateIssue_Success(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(CreateIssueResponse{
+		json.NewEncoder(w).Encode(CreateIssueResponse{ //nolint:errcheck,gosec
 			ID:   "10001",
 			Key:  "PROJ-1",
 			Self: "https://jira.example.com/rest/api/2/issue/10001",
@@ -319,7 +321,7 @@ func TestCreateIssue_Success(t *testing.T) {
 func TestCreateIssue_ClientError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"errors":{"summary":"required"}}`))
+		w.Write([]byte(`{"errors":{"summary":"required"}}`)) //nolint:errcheck,gosec
 	}))
 	defer server.Close()
 
@@ -335,7 +337,7 @@ func TestCreateIssue_ClientError(t *testing.T) {
 	if !errors.As(err, &apiErr) {
 		t.Fatalf("expected *APIError, got %T: %v", err, err)
 	}
-	if apiErr.StatusCode != 400 {
+	if apiErr.StatusCode != http.StatusBadRequest {
 		t.Errorf("StatusCode = %d, want 400", apiErr.StatusCode)
 	}
 }
@@ -345,7 +347,7 @@ func TestCreateIssue_ServerError_RetriesAndFails(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&attempts, 1)
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("internal error"))
+		w.Write([]byte("internal error")) //nolint:errcheck,gosec
 	}))
 	defer server.Close()
 
@@ -370,11 +372,11 @@ func TestCreateIssue_ServerError_RetriesAndSucceeds(t *testing.T) {
 		n := atomic.AddInt32(&attempts, 1)
 		if n < 2 {
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("temporary failure"))
+			w.Write([]byte("temporary failure")) //nolint:errcheck,gosec
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(CreateIssueResponse{Key: "PROJ-1"})
+		json.NewEncoder(w).Encode(CreateIssueResponse{Key: "PROJ-1"}) //nolint:errcheck,gosec
 	}))
 	defer server.Close()
 
@@ -402,7 +404,7 @@ func TestSearchIssues_Success(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(SearchResult{
+		json.NewEncoder(w).Encode(SearchResult{ //nolint:errcheck,gosec
 			Total: 1,
 			Issues: []SearchIssue{
 				{Key: "PROJ-1", Fields: map[string]any{"summary": "test"}},
@@ -480,7 +482,7 @@ func TestCreateIssue_CloudUsesAPIv3(t *testing.T) {
 			t.Errorf("path = %q, want /rest/api/3/issue (Cloud)", r.URL.Path)
 		}
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(CreateIssueResponse{Key: "CLOUD-1"})
+		json.NewEncoder(w).Encode(CreateIssueResponse{Key: "CLOUD-1"}) //nolint:errcheck,gosec
 	}))
 	defer server.Close()
 
@@ -506,7 +508,7 @@ func TestDoRequest_RateLimit429(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(CreateIssueResponse{Key: "PROJ-1"})
+		json.NewEncoder(w).Encode(CreateIssueResponse{Key: "PROJ-1"}) //nolint:errcheck,gosec
 	}))
 	defer server.Close()
 
@@ -563,7 +565,7 @@ func TestFetchEpics_Success(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(SearchResult{
+		json.NewEncoder(w).Encode(SearchResult{ //nolint:errcheck,gosec
 			Total: 2,
 			Issues: []SearchIssue{
 				{
@@ -626,7 +628,7 @@ func TestFetchEpics_WithStatusFilter(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(SearchResult{
+		json.NewEncoder(w).Encode(SearchResult{ //nolint:errcheck,gosec
 			Total: 1,
 			Issues: []SearchIssue{
 				{
@@ -668,7 +670,7 @@ func TestFetchEpics_StatusFilterNoResults(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(SearchResult{Total: 0, Issues: nil})
+		json.NewEncoder(w).Encode(SearchResult{Total: 0, Issues: nil}) //nolint:errcheck,gosec
 	}))
 	defer server.Close()
 
@@ -693,7 +695,7 @@ func TestFetchEpics_NegatedStatusFilter(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(SearchResult{
+		json.NewEncoder(w).Encode(SearchResult{ //nolint:errcheck,gosec
 			Total: 2,
 			Issues: []SearchIssue{
 				{
@@ -736,7 +738,7 @@ func TestFetchEpics_NegatedStatusFilter(t *testing.T) {
 func TestFetchEpics_Empty(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(SearchResult{Total: 0, Issues: nil})
+		json.NewEncoder(w).Encode(SearchResult{Total: 0, Issues: nil}) //nolint:errcheck,gosec
 	}))
 	defer server.Close()
 
@@ -773,7 +775,7 @@ func TestFetchEpics_Pagination(t *testing.T) {
 					},
 				}
 			}
-			json.NewEncoder(w).Encode(SearchResult{Total: 75, Issues: issues})
+			json.NewEncoder(w).Encode(SearchResult{Total: 75, Issues: issues}) //nolint:errcheck,gosec
 
 		case page == 2 && startAt == "50":
 			// Second page: 25 results
@@ -787,11 +789,11 @@ func TestFetchEpics_Pagination(t *testing.T) {
 					},
 				}
 			}
-			json.NewEncoder(w).Encode(SearchResult{Total: 75, Issues: issues})
+			json.NewEncoder(w).Encode(SearchResult{Total: 75, Issues: issues}) //nolint:errcheck,gosec
 
 		default:
 			t.Errorf("unexpected request: page=%d, startAt=%s", page, startAt)
-			json.NewEncoder(w).Encode(SearchResult{Total: 0, Issues: nil})
+			json.NewEncoder(w).Encode(SearchResult{Total: 0, Issues: nil}) //nolint:errcheck,gosec
 		}
 	}))
 	defer server.Close()
@@ -824,7 +826,7 @@ func TestFetchEpics_Pagination(t *testing.T) {
 func TestFetchEpics_APIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"errorMessages":["invalid JQL"]}`))
+		w.Write([]byte(`{"errorMessages":["invalid JQL"]}`)) //nolint:errcheck,gosec
 	}))
 	defer server.Close()
 
@@ -840,7 +842,7 @@ func TestFetchEpics_APIError(t *testing.T) {
 func TestFetchEpics_MissingStatusField(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(SearchResult{
+		json.NewEncoder(w).Encode(SearchResult{ //nolint:errcheck,gosec
 			Total: 1,
 			Issues: []SearchIssue{
 				{
@@ -883,7 +885,7 @@ func TestFetchEpics_CloudUsesV3(t *testing.T) {
 			}
 		}
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(SearchResult{Total: 0, Issues: nil})
+		json.NewEncoder(w).Encode(SearchResult{Total: 0, Issues: nil}) //nolint:errcheck,gosec
 	}))
 	defer server.Close()
 
@@ -905,7 +907,7 @@ func TestDoRequest_NoRetryOn4xx(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				atomic.AddInt32(&attempts, 1)
 				w.WriteHeader(code)
-				w.Write([]byte(`{"error":"client error"}`))
+				w.Write([]byte(`{"error":"client error"}`)) //nolint:errcheck,gosec
 			}))
 			defer server.Close()
 
@@ -938,7 +940,7 @@ func TestFetchFields_Success(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode([]Field{
+		json.NewEncoder(w).Encode([]Field{ //nolint:errcheck,gosec
 			{ID: "summary", Name: "Summary", Custom: false},
 			{ID: "customfield_10009", Name: "Epic Link", Custom: true, Schema: &FieldSchema{
 				Type: "any", Custom: "com.pyxis.greenhopper.jira:gh-epic-link", CustomID: 10009,
@@ -979,7 +981,7 @@ func TestFetchFields_Success(t *testing.T) {
 func TestFetchFields_Empty(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode([]Field{})
+		json.NewEncoder(w).Encode([]Field{}) //nolint:errcheck,gosec
 	}))
 	defer server.Close()
 
@@ -998,7 +1000,7 @@ func TestFetchFields_Empty(t *testing.T) {
 func TestFetchFields_APIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"errorMessages":["unauthorized"]}`))
+		w.Write([]byte(`{"errorMessages":["unauthorized"]}`)) //nolint:errcheck,gosec
 	}))
 	defer server.Close()
 
@@ -1017,7 +1019,7 @@ func TestFetchFields_CloudUsesV3(t *testing.T) {
 			t.Errorf("path = %q, want /rest/api/3/field (Cloud v3)", r.URL.Path)
 		}
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode([]Field{})
+		json.NewEncoder(w).Encode([]Field{}) //nolint:errcheck,gosec
 	}))
 	defer server.Close()
 
@@ -1034,7 +1036,7 @@ func TestFetchFields_NoSchema(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		// Some fields (like "issuekey") have no schema at all
-		w.Write([]byte(`[{"id":"issuekey","name":"Key","custom":false}]`))
+		w.Write([]byte(`[{"id":"issuekey","name":"Key","custom":false}]`)) //nolint:errcheck,gosec
 	}))
 	defer server.Close()
 
@@ -1061,7 +1063,7 @@ func TestFetchIssueLinkTypes_Success(t *testing.T) {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck,gosec
 			"issueLinkTypes": []map[string]any{
 				{"id": "10000", "name": "Blocks", "inward": "is blocked by", "outward": "blocks"},
 				{"id": "10001", "name": "Duplicate", "inward": "is duplicated by", "outward": "duplicates"},
@@ -1093,7 +1095,7 @@ func TestFetchIssueLinkTypes_Success(t *testing.T) {
 func TestFetchIssueLinkTypes_Empty(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"issueLinkTypes": []any{}})
+		json.NewEncoder(w).Encode(map[string]any{"issueLinkTypes": []any{}}) //nolint:errcheck,gosec
 	}))
 	defer ts.Close()
 
@@ -1110,7 +1112,7 @@ func TestFetchIssueLinkTypes_Empty(t *testing.T) {
 func TestFetchIssueLinkTypes_APIError(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
-		w.Write([]byte(`{"errorMessages":["Forbidden"]}`))
+		w.Write([]byte(`{"errorMessages":["Forbidden"]}`)) //nolint:errcheck,gosec
 	}))
 	defer ts.Close()
 
@@ -1127,7 +1129,7 @@ func TestFetchIssueLinkTypes_CloudUsesV3(t *testing.T) {
 			t.Errorf("expected v3 path, got %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"issueLinkTypes": []any{}})
+		json.NewEncoder(w).Encode(map[string]any{"issueLinkTypes": []any{}}) //nolint:errcheck,gosec
 	}))
 	defer ts.Close()
 

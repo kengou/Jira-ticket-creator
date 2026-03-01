@@ -2,11 +2,13 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+
+	"github.com/spf13/cobra"
 
 	"github.com/kengou/Jira-ticket-creator/internal/apply"
 	"github.com/kengou/Jira-ticket-creator/internal/config"
-	"github.com/spf13/cobra"
 )
 
 var planCmd = &cobra.Command{
@@ -35,9 +37,9 @@ func runPlan() error {
 	}
 
 	// Validate
-	errors := validateConfig(cfg)
+	errs := validateConfig(cfg)
 	hasErrors := false
-	for _, e := range errors {
+	for _, e := range errs {
 		if e.Severity == "error" {
 			if !hasErrors {
 				fmt.Println("❌ Configuration has validation errors:")
@@ -47,7 +49,7 @@ func runPlan() error {
 		}
 	}
 	if hasErrors {
-		return fmt.Errorf("cannot create plan due to validation errors")
+		return errors.New("cannot create plan due to validation errors")
 	}
 
 	// Print plan
