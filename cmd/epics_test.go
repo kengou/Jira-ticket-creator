@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	"sigs.k8s.io/yaml"
 
 	"github.com/kengou/Jira-ticket-creator/internal/jira"
 )

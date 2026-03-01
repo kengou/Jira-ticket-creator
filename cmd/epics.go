@@ -8,7 +8,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
+	"sigs.k8s.io/yaml"
 
 	"github.com/kengou/Jira-ticket-creator/internal/jira"
 )
@@ -59,23 +59,23 @@ func validateEpicsFlags() error {
 
 // epicsYAMLIssue represents an epic in the YAML output format.
 type epicsYAMLIssue struct {
-	ID          string `yaml:"id"`
-	IssueType   string `yaml:"issueType"`
-	EpicName    string `yaml:"epicName"`
-	Summary     string `yaml:"summary"`
-	Description string `yaml:"description,omitempty"`
+	ID          string `json:"id" yaml:"id"`
+	IssueType   string `json:"issueType" yaml:"issueType"`
+	EpicName    string `json:"epicName" yaml:"epicName"`
+	Summary     string `json:"summary" yaml:"summary"`
+	Description string `json:"description,omitempty" yaml:"description,omitempty"`
 }
 
 // epicsYAMLDefaults represents the defaults section in the YAML output.
 type epicsYAMLDefaults struct {
-	ProjectKey string `yaml:"projectKey"`
+	ProjectKey string `json:"projectKey" yaml:"projectKey"`
 }
 
 // epicsYAMLConfig represents the full YAML output structure.
 type epicsYAMLConfig struct {
-	SchemaVersion string            `yaml:"schemaVersion"`
-	Defaults      epicsYAMLDefaults `yaml:"defaults"`
-	Issues        []epicsYAMLIssue  `yaml:"issues"`
+	SchemaVersion string            `json:"schemaVersion" yaml:"schemaVersion"`
+	Defaults      epicsYAMLDefaults `json:"defaults" yaml:"defaults"`
+	Issues        []epicsYAMLIssue  `json:"issues" yaml:"issues"`
 }
 
 // epicsToYAML converts fetched epics to a YAML byte slice following the
