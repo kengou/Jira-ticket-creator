@@ -232,6 +232,11 @@ func (c *Client) doRequest(method, endpoint string, body any, result any) error 
 
 		resp, err := c.httpClient.Do(req) //nolint:gosec
 		if err != nil {
+			// Per Go docs, resp may be non-nil even when err is non-nil (e.g.
+			// redirect errors). Close the body to avoid leaking file descriptors.
+			if resp != nil && resp.Body != nil {
+				resp.Body.Close() //nolint:errcheck,gosec
+			}
 			lastErr = fmt.Errorf("execute request: %w", err)
 			continue
 		}

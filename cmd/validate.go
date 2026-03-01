@@ -184,7 +184,7 @@ func validateIssueSchema(cfg *config.Config, issue *config.Issue) []ValidationEr
 		})
 	}
 
-	if effectiveType == "Epic" && issue.EpicName == "" {
+	if strings.EqualFold(effectiveType, "Epic") && issue.EpicName == "" {
 		errors = append(errors, ValidationError{
 			IssueID:  issue.ID,
 			Field:    "epicName",
@@ -257,7 +257,7 @@ func validateBusinessLogic(cfg *config.Config) []ValidationError {
 		// Validate parent-child type relationships
 		if issue.Parent != "" {
 			if parent, ok := issueMap[issue.Parent]; ok {
-				if err := validateParentChild(*parent, issue); err != nil {
+				if err := validateParentChild(cfg.EffectiveIssueType(parent), cfg.EffectiveIssueType(&issue)); err != nil {
 					errors = append(errors, ValidationError{
 						IssueID:  issue.ID,
 						Field:    "issueType",
@@ -453,19 +453,20 @@ func isCommonLinkType(linkType string) bool {
 }
 
 // validateParentChild checks if parent-child issue type combination is valid in Jira.
+// parentType and childType must be effective types (with defaults applied).
 // Returns error (warning-level) if combination seems invalid.
-func validateParentChild(parent, child config.Issue) error {
+func validateParentChild(parentType, childType string) error {
 	// Typical Jira hierarchy: Epic -> Story/Task -> Subtask
 	// Subtasks can only be children of Story/Task/Bug, not Epic or other Subtasks
 
-	if strings.ToLower(child.IssueType) == "subtask" {
+	if strings.EqualFold(childType, "subtask") {
 		validParents := []string{"story", "task", "bug"}
-		if !slices.Contains(validParents, strings.ToLower(parent.IssueType)) {
-			return fmt.Errorf("subtask can only have parent of type Story/Task/Bug, not %q", parent.IssueType)
+		if !slices.Contains(validParents, strings.ToLower(parentType)) {
+			return fmt.Errorf("subtask can only have parent of type Story/Task/Bug, not %q", parentType)
 		}
 	}
 
-	if strings.ToLower(parent.IssueType) == "subtask" {
+	if strings.EqualFold(parentType, "subtask") {
 		return errors.New("subtask cannot be a parent issue")
 	}
 

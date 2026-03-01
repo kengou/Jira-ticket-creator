@@ -98,6 +98,16 @@ type IssueLink struct {
 	Comment string `yaml:"comment,omitempty"`
 }
 
+// LoadConfigFromBytes parses a YAML configuration from an in-memory byte slice.
+func LoadConfigFromBytes(data []byte) (*Config, error) {
+	var cfg Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse YAML: %w", err)
+	}
+	cfg.applyDefaults()
+	return &cfg, nil
+}
+
 // LoadConfig loads and parses a YAML configuration file.
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path) //nolint:gosec

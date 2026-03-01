@@ -61,7 +61,7 @@ func NewApplier(cfg *config.Config, client JiraClient, verbose, dryRun bool, con
 		dryRun:          dryRun,
 		continueOnError: continueOnError,
 		configFile:      configFile,
-		createdIssues:   make(map[string]string),
+		createdIssues:   make(map[string]string, len(cfg.Issues)),
 		epicIDs:         epicIDs,
 	}
 }

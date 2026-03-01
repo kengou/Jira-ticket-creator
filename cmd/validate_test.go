@@ -396,64 +396,43 @@ func TestIsCommonLinkType(t *testing.T) {
 // --- validateParentChild ---
 
 func TestValidateParentChild_ValidStoryUnderEpic(t *testing.T) {
-	parent := config.Issue{IssueType: "Epic"}
-	child := config.Issue{IssueType: "Story"}
-
-	if err := validateParentChild(parent, child); err != nil {
+	if err := validateParentChild("Epic", "Story"); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestValidateParentChild_SubtaskUnderStory(t *testing.T) {
-	parent := config.Issue{IssueType: "Story"}
-	child := config.Issue{IssueType: "Subtask"}
-
-	if err := validateParentChild(parent, child); err != nil {
+	if err := validateParentChild("Story", "Subtask"); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestValidateParentChild_SubtaskUnderTask(t *testing.T) {
-	parent := config.Issue{IssueType: "Task"}
-	child := config.Issue{IssueType: "Subtask"}
-
-	if err := validateParentChild(parent, child); err != nil {
+	if err := validateParentChild("Task", "Subtask"); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestValidateParentChild_SubtaskUnderBug(t *testing.T) {
-	parent := config.Issue{IssueType: "Bug"}
-	child := config.Issue{IssueType: "Subtask"}
-
-	if err := validateParentChild(parent, child); err != nil {
+	if err := validateParentChild("Bug", "Subtask"); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestValidateParentChild_SubtaskUnderEpic(t *testing.T) {
-	parent := config.Issue{IssueType: "Epic"}
-	child := config.Issue{IssueType: "Subtask"}
-
-	if err := validateParentChild(parent, child); err == nil {
+	if err := validateParentChild("Epic", "Subtask"); err == nil {
 		t.Error("expected error: Subtask cannot have Epic as parent")
 	}
 }
 
 func TestValidateParentChild_SubtaskParent(t *testing.T) {
-	parent := config.Issue{IssueType: "Subtask"}
-	child := config.Issue{IssueType: "Task"}
-
-	if err := validateParentChild(parent, child); err == nil {
+	if err := validateParentChild("Subtask", "Task"); err == nil {
 		t.Error("expected error: Subtask cannot be a parent")
 	}
 }
 
 func TestValidateParentChild_SubtaskUnderSubtask(t *testing.T) {
-	parent := config.Issue{IssueType: "Subtask"}
-	child := config.Issue{IssueType: "Subtask"}
-
-	if err := validateParentChild(parent, child); err == nil {
+	if err := validateParentChild("Subtask", "Subtask"); err == nil {
 		t.Error("expected error: Subtask cannot be parent of Subtask")
 	}
 }
