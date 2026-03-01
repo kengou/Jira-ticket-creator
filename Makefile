@@ -15,8 +15,8 @@ BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 all: build
 
 ## build: compile the binary
-build:
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BINARY) .
+build: $(BINDIR)
+	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BINDIR)/$(BINARY) .
 
 ## test: run all tests
 test:
@@ -54,7 +54,7 @@ tidy:
 
 ## clean: remove build artifacts
 clean:
-	rm -f $(BINARY)
+	rm -f $(BINDIR)/$(BINARY)
 
 ## install: install the binary to $GOPATH/bin
 install:

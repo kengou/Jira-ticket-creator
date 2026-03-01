@@ -587,6 +587,7 @@ func TestBuildIssueFields_ParentEpic_UsesEpicLink(t *testing.T) {
 		createdIssues: map[string]string{
 			"epic-1": "PROJ-100",
 		},
+		epicIDs: map[string]bool{"epic-1": true},
 	}
 
 	fields, err := a.buildIssueFields(&cfg.Issues[1])
@@ -867,80 +868,58 @@ func TestGetEpicLinkFieldID_Custom(t *testing.T) {
 	}
 }
 
-// --- isEpic tests ---
+// --- epicIDs set (replaces isEpic method) ---
 
-func TestIsEpic_ExplicitEpicType(t *testing.T) {
-	a := &Applier{
-		config: &config.Config{
-			Issues: []config.Issue{
-				{ID: "epic-1", IssueType: "Epic"},
-			},
-		},
-	}
-	if !a.isEpic("epic-1") {
-		t.Error("isEpic('epic-1') = false, want true")
+func TestEpicIDs_ExplicitEpicType(t *testing.T) {
+	a := NewApplier(&config.Config{
+		Issues: []config.Issue{{ID: "epic-1", IssueType: "Epic"}},
+	}, nil, false, false, "config.yaml")
+	if !a.epicIDs["epic-1"] {
+		t.Error("epicIDs should contain 'epic-1'")
 	}
 }
 
-func TestIsEpic_CaseInsensitive(t *testing.T) {
-	a := &Applier{
-		config: &config.Config{
-			Issues: []config.Issue{
-				{ID: "epic-1", IssueType: "epic"},
-			},
-		},
-	}
-	if !a.isEpic("epic-1") {
-		t.Error("isEpic should be case-insensitive, got false for 'epic'")
+func TestEpicIDs_CaseInsensitive(t *testing.T) {
+	a := NewApplier(&config.Config{
+		Issues: []config.Issue{{ID: "epic-1", IssueType: "epic"}},
+	}, nil, false, false, "config.yaml")
+	if !a.epicIDs["epic-1"] {
+		t.Error("epicIDs should be case-insensitive for 'epic'")
 	}
 }
 
-func TestIsEpic_DefaultIssueType(t *testing.T) {
-	a := &Applier{
-		config: &config.Config{
-			Defaults: config.Defaults{IssueType: "Epic"},
-			Issues: []config.Issue{
-				{ID: "epic-1"}, // no explicit type, inherits default
-			},
-		},
-	}
-	if !a.isEpic("epic-1") {
-		t.Error("isEpic should use default issue type, got false")
+func TestEpicIDs_DefaultIssueType(t *testing.T) {
+	a := NewApplier(&config.Config{
+		Defaults: config.Defaults{IssueType: "Epic"},
+		Issues:   []config.Issue{{ID: "epic-1"}}, // inherits default
+	}, nil, false, false, "config.yaml")
+	if !a.epicIDs["epic-1"] {
+		t.Error("epicIDs should use default issue type")
 	}
 }
 
-func TestIsEpic_NonEpicType(t *testing.T) {
-	a := &Applier{
-		config: &config.Config{
-			Issues: []config.Issue{
-				{ID: "story-1", IssueType: "Story"},
-			},
-		},
-	}
-	if a.isEpic("story-1") {
-		t.Error("isEpic('story-1') = true, want false for Story type")
+func TestEpicIDs_NonEpicType(t *testing.T) {
+	a := NewApplier(&config.Config{
+		Issues: []config.Issue{{ID: "story-1", IssueType: "Story"}},
+	}, nil, false, false, "config.yaml")
+	if a.epicIDs["story-1"] {
+		t.Error("epicIDs should not contain Story type")
 	}
 }
 
-func TestIsEpic_UnknownID(t *testing.T) {
-	a := &Applier{
-		config: &config.Config{
-			Issues: []config.Issue{
-				{ID: "epic-1", IssueType: "Epic"},
-			},
-		},
-	}
-	if a.isEpic("nonexistent") {
-		t.Error("isEpic('nonexistent') = true, want false for unknown ID")
+func TestEpicIDs_UnknownID(t *testing.T) {
+	a := NewApplier(&config.Config{
+		Issues: []config.Issue{{ID: "epic-1", IssueType: "Epic"}},
+	}, nil, false, false, "config.yaml")
+	if a.epicIDs["nonexistent"] {
+		t.Error("epicIDs should not contain unknown ID")
 	}
 }
 
-func TestIsEpic_EmptyConfig(t *testing.T) {
-	a := &Applier{
-		config: &config.Config{},
-	}
-	if a.isEpic("anything") {
-		t.Error("isEpic should return false when no issues in config")
+func TestEpicIDs_EmptyConfig(t *testing.T) {
+	a := NewApplier(&config.Config{}, nil, false, false, "config.yaml")
+	if a.epicIDs["anything"] {
+		t.Error("epicIDs should be empty for empty config")
 	}
 }
 

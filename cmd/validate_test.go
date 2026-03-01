@@ -499,6 +499,30 @@ func TestValidateTemplates_AllRequiredVarsPresent(t *testing.T) {
 	}
 }
 
+func TestValidateTemplates_InheritedIssueType(t *testing.T) {
+	// Issue inherits type "Task" from defaults (issue.IssueType == "").
+	// The required "goal" var is absent but another var is present,
+	// so the template-vars check is triggered.
+	cfg := validConfig()
+	cfg.Defaults.DescriptionTemplate = "Owner: {owner}\nGoal: {goal}"
+	cfg.Defaults.IssueType = "Task"
+	cfg.Validation = &config.Validation{
+		RequiredFields: map[string][]string{
+			"Task": {"goal", "owner"},
+		},
+	}
+	cfg.Issues[0].IssueType = "" // inherited from defaults
+	cfg.Issues[0].TemplateVars = map[string]string{
+		"owner": "alice",
+		// "goal" is intentionally missing
+	}
+
+	errs := validateTemplates(cfg)
+	if !hasError(errs, "templateVars", "error") {
+		t.Error("expected error for missing required template variable with inherited issue type")
+	}
+}
+
 func TestValidateTemplates_NoTemplateConfigured(t *testing.T) {
 	cfg := validConfig()
 	cfg.Defaults.DescriptionTemplate = ""

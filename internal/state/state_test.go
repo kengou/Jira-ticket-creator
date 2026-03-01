@@ -33,7 +33,7 @@ func withTempDir(t *testing.T, fn func(dir string)) {
 
 func TestLoad_NewStateWhenFileDoesNotExist(t *testing.T) {
 	withTempDir(t, func(_ string) {
-		st, err := Load("PROJ", "")
+		st, err := Load("PROJ")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -67,7 +67,7 @@ func TestLoad_ReadsExistingState(t *testing.T) {
 		}
 		writeStateFile(t, dir, existing)
 
-		st, err := Load("PROJ", "")
+		st, err := Load("PROJ")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -90,7 +90,7 @@ func TestLoad_MismatchedProjectKey(t *testing.T) {
 		}
 		writeStateFile(t, dir, existing)
 
-		_, err := Load("PROJ", "")
+		_, err := Load("PROJ")
 		if err == nil {
 			t.Fatal("expected error for mismatched project key")
 		}
@@ -103,24 +103,19 @@ func TestLoad_CorruptedFile(t *testing.T) {
 		if err := os.WriteFile(path, []byte("{{{bad json"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		_, err := Load("PROJ", "")
+		_, err := Load("PROJ")
 		if err == nil {
 			t.Fatal("expected error for corrupted state file")
 		}
 	})
 }
 
-func TestLoad_WithConfigFile_PlacesStateInCwd(t *testing.T) {
+func TestLoad_PlacesStateInCwd(t *testing.T) {
 	withTempDir(t, func(_ string) {
-		// Config lives in a completely different directory
-		configPath := filepath.Join(t.TempDir(), "my-config.yaml")
-
-		st, err := Load("PROJ", configPath)
+		st, err := Load("PROJ")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// State must always land in cwd, not next to the config file.
-		// Use os.Getwd() for the expected path to match symlink resolution.
 		actualCwd, err := os.Getwd()
 		if err != nil {
 			t.Fatalf("getwd: %v", err)
@@ -132,46 +127,11 @@ func TestLoad_WithConfigFile_PlacesStateInCwd(t *testing.T) {
 	})
 }
 
-func TestLoad_WithConfigFile_ReadsExistingState(t *testing.T) {
-	withTempDir(t, func(cwd string) {
-		// Config lives elsewhere; state is read from cwd
-		configPath := filepath.Join(t.TempDir(), "my-config.yaml")
-
-		existing := &State{
-			IssueMapping: map[string]IssueRecord{
-				"task-1": {
-					JiraKey:    testJiraKey,
-					InternalID: "task-1",
-					IssueType:  "Task",
-					Summary:    "A task",
-					CreatedAt:  time.Now().Add(-time.Hour),
-					ConfigFile: "my-config.yaml",
-				},
-			},
-			UpdatedAt:  time.Now().Add(-time.Hour),
-			ProjectKey: "PROJ",
-		}
-		writeStateFile(t, cwd, existing) // write to cwd, not config dir
-
-		st, err := Load("PROJ", configPath)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if st.Count() != 1 {
-			t.Fatalf("Count() = %d, want 1", st.Count())
-		}
-		key, ok := st.GetJiraKey("task-1")
-		if !ok || key != testJiraKey {
-			t.Errorf("GetJiraKey(task-1) = (%q, %v), want (PROJ-1, true)", key, ok)
-		}
-	})
-}
-
 // --- Save ---
 
 func TestSave_WritesFile(t *testing.T) {
 	withTempDir(t, func(dir string) {
-		st, err := Load("PROJ", "")
+		st, err := Load("PROJ")
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
@@ -201,7 +161,7 @@ func TestSave_WritesFile(t *testing.T) {
 
 func TestSave_UpdatesTimestamp(t *testing.T) {
 	withTempDir(t, func(_ string) {
-		st, err := Load("PROJ", "")
+		st, err := Load("PROJ")
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
@@ -218,10 +178,7 @@ func TestSave_UpdatesTimestamp(t *testing.T) {
 
 func TestSave_WritesToCwd(t *testing.T) {
 	withTempDir(t, func(cwd string) {
-		// Config lives in a different directory
-		configPath := filepath.Join(t.TempDir(), "my-config.yaml")
-
-		st, err := Load("PROJ", configPath)
+		st, err := Load("PROJ")
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
@@ -231,7 +188,7 @@ func TestSave_WritesToCwd(t *testing.T) {
 			t.Fatalf("Save: %v", err)
 		}
 
-		// State file must be in cwd, not next to the config
+		// State file must be in cwd
 		statePath := filepath.Join(cwd, stateFileName)
 		if _, err := os.Stat(statePath); err != nil {
 			t.Fatalf("state file should exist in cwd at %s: %v", statePath, err)
@@ -341,7 +298,7 @@ func TestCount(t *testing.T) {
 
 func TestClear_RemovesFile(t *testing.T) {
 	withTempDir(t, func(dir string) {
-		st, err := Load("PROJ", "")
+		st, err := Load("PROJ")
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
@@ -380,7 +337,7 @@ func TestClearForConfig_RemovesFile(t *testing.T) {
 	withTempDir(t, func(cwd string) {
 		configPath := filepath.Join(t.TempDir(), "config.yaml")
 
-		st, err := Load("PROJ", configPath)
+		st, err := Load("PROJ")
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
@@ -403,9 +360,7 @@ func TestClearForConfig_RemovesFile(t *testing.T) {
 
 func TestPath_ReturnsResolvedPath(t *testing.T) {
 	withTempDir(t, func(_ string) {
-		configPath := filepath.Join(t.TempDir(), "config.yaml")
-
-		st, err := Load("PROJ", configPath)
+		st, err := Load("PROJ")
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
@@ -420,23 +375,12 @@ func TestPath_ReturnsResolvedPath(t *testing.T) {
 	})
 }
 
-// --- GetStatePath (deprecated compat) ---
-
-func TestGetStatePath_ContainsFileName(t *testing.T) {
-	path := GetStatePath()
-	if filepath.Base(path) != stateFileName {
-		t.Errorf("GetStatePath base = %q, want %q", filepath.Base(path), stateFileName)
-	}
-}
-
 // --- Round-trip: Load -> modify -> Save -> Load ---
 
 func TestRoundTrip(t *testing.T) {
 	withTempDir(t, func(_ string) {
-		configPath := filepath.Join(t.TempDir(), "config.yaml")
-
 		// Load fresh
-		st, err := Load("PROJ", configPath)
+		st, err := Load("PROJ")
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
@@ -451,7 +395,7 @@ func TestRoundTrip(t *testing.T) {
 		}
 
 		// Reload
-		st2, err := Load("PROJ", configPath)
+		st2, err := Load("PROJ")
 		if err != nil {
 			t.Fatalf("Load after Save: %v", err)
 		}
@@ -479,10 +423,8 @@ func TestRoundTrip(t *testing.T) {
 
 func TestRoundTrip_Idempotency(t *testing.T) {
 	withTempDir(t, func(_ string) {
-		configPath := filepath.Join(t.TempDir(), "config.yaml")
-
 		// First run: create and save
-		st, err := Load("PROJ", configPath)
+		st, err := Load("PROJ")
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
@@ -493,7 +435,7 @@ func TestRoundTrip_Idempotency(t *testing.T) {
 		}
 
 		// Second run: load and check
-		st2, err := Load("PROJ", configPath)
+		st2, err := Load("PROJ")
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}

@@ -425,10 +425,10 @@ func printSummary(cfg *config.Config) {
 	fmt.Printf("  - Project: %s\n", cfg.Defaults.ProjectKey)
 	fmt.Printf("  - Issues: %d\n", len(cfg.Issues))
 
-	// Count issue types
+	// Count issue types (using effective type so default-inherited types are counted correctly)
 	typeCounts := make(map[string]int)
 	for _, issue := range cfg.Issues {
-		typeCounts[issue.IssueType]++
+		typeCounts[cfg.EffectiveIssueType(&issue)]++
 	}
 	keys := make([]string, 0, len(typeCounts))
 	for t := range typeCounts {

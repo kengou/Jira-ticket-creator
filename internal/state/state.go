@@ -42,7 +42,7 @@ type IssueRecord struct {
 // working directory, so running from the project root always uses the same
 // state regardless of where the config file lives. Returns a new empty state
 // if the file doesn't exist.
-func Load(projectKey, configFile string) (*State, error) {
+func Load(projectKey string) (*State, error) {
 	statePath := statePathFor()
 
 	if _, err := os.Stat(statePath); os.IsNotExist(err) {
@@ -179,17 +179,6 @@ func (s *State) Path() string {
 // Keeping state in cwd (typically the project root) ensures a single unified
 // state file regardless of where config YAML files are located within the repo.
 func statePathFor() string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return stateFileName
-	}
-	return filepath.Join(cwd, stateFileName)
-}
-
-// GetStatePath returns the state file path for display purposes.
-//
-// Deprecated: use State.Path() on a loaded state instead.
-func GetStatePath() string {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return stateFileName

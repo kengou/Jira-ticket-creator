@@ -35,6 +35,8 @@ type Applier struct {
 
 	// Runtime state: internal ID -> Jira key
 	createdIssues map[string]string
+	// epicIDs is a pre-built set of internal IDs whose effective type is "Epic".
+	epicIDs map[string]bool
 }
 
 // NewApplier creates a new Applier.
@@ -42,6 +44,14 @@ func NewApplier(cfg *config.Config, client JiraClient, verbose, dryRun bool, con
 	continueOnError := false
 	if cfg.Options != nil {
 		continueOnError = cfg.Options.ContinueOnError
+	}
+
+	// Pre-build epic ID set for O(1) lookup in buildIssueFields.
+	epicIDs := make(map[string]bool, len(cfg.Issues))
+	for i := range cfg.Issues {
+		if strings.EqualFold(cfg.EffectiveIssueType(&cfg.Issues[i]), "Epic") {
+			epicIDs[cfg.Issues[i].ID] = true
+		}
 	}
 
 	return &Applier{
@@ -52,16 +62,17 @@ func NewApplier(cfg *config.Config, client JiraClient, verbose, dryRun bool, con
 		continueOnError: continueOnError,
 		configFile:      configFile,
 		createdIssues:   make(map[string]string),
+		epicIDs:         epicIDs,
 	}
 }
 
 // Apply creates all issues in dependency order.
 func (a *Applier) Apply() error {
 	// Always load state for duplicate detection (unless dry-run).
-	// The state file is placed next to the YAML config file so that re-running
-	// the same config from any working directory finds the same state.
+	// The state file is placed in the current working directory so that
+	// re-running from the project root always uses the same state file.
 	if !a.dryRun {
-		st, err := state.Load(a.config.Defaults.ProjectKey, a.configFile)
+		st, err := state.Load(a.config.Defaults.ProjectKey)
 		if err != nil {
 			return fmt.Errorf("load state: %w", err)
 		}
@@ -114,20 +125,22 @@ func (a *Applier) Apply() error {
 		return fmt.Errorf("create issue links: %w", err)
 	}
 
-	// Summary
-	createdCount := len(a.createdIssues) - skippedCount
-	switch {
-	case skippedCount > 0 && failedCount > 0:
-		fmt.Printf("\n⚠️  Created %d, skipped %d (already exist), failed %d of %d issues\n",
-			createdCount, skippedCount, failedCount, len(ordered))
-	case skippedCount > 0:
-		fmt.Printf("\n✅ Created %d, skipped %d (already exist) of %d issues\n",
-			createdCount, skippedCount, len(ordered))
-	case failedCount > 0:
-		fmt.Printf("\n⚠️  Created %d of %d issues (%d failed)\n",
-			createdCount, len(ordered), failedCount)
-	default:
-		fmt.Printf("\n✅ Successfully created %d issues!\n", createdCount)
+	// Summary (suppressed in dry-run — the caller prints its own dry-run message)
+	if !a.dryRun {
+		createdCount := len(a.createdIssues) - skippedCount
+		switch {
+		case skippedCount > 0 && failedCount > 0:
+			fmt.Printf("\n⚠️  Created %d, skipped %d (already exist), failed %d of %d issues\n",
+				createdCount, skippedCount, failedCount, len(ordered))
+		case skippedCount > 0:
+			fmt.Printf("\n✅ Created %d, skipped %d (already exist) of %d issues\n",
+				createdCount, skippedCount, len(ordered))
+		case failedCount > 0:
+			fmt.Printf("\n⚠️  Created %d of %d issues (%d failed)\n",
+				createdCount, len(ordered), failedCount)
+		default:
+			fmt.Printf("\n✅ Successfully created %d issues!\n", createdCount)
+		}
 	}
 	return nil
 }
@@ -265,7 +278,7 @@ func (a *Applier) buildIssueFields(issue *config.Issue) (map[string]any, error) 
 			return nil, fmt.Errorf("issue %q: parent %q not in dependency order or not yet created",
 				issue.ID, issue.Parent)
 		}
-		if a.isEpic(issue.Parent) {
+		if a.epicIDs[issue.Parent] {
 			// Parent is an Epic → use epic link custom field
 			fields[a.getEpicLinkFieldID()] = parentKey
 		} else {
@@ -427,7 +440,11 @@ func (a *Applier) createIssueLinks() error {
 	}
 
 	if linkCount > 0 {
-		fmt.Printf("\n🔗 Created %d issue links\n", linkCount)
+		if a.dryRun {
+			fmt.Printf("\n🔍 [DRY RUN] Would create %d issue links\n", linkCount)
+		} else {
+			fmt.Printf("\n🔗 Created %d issue links\n", linkCount)
+		}
 	}
 
 	return errors.Join(errs...)
@@ -555,16 +572,6 @@ func (a *Applier) getEpicLinkFieldID() string {
 	return "customfield_10009"
 }
 
-// isEpic returns true if the given internal ID refers to an Epic in the config.
-func (a *Applier) isEpic(internalID string) bool {
-	for i := range a.config.Issues {
-		if a.config.Issues[i].ID == internalID {
-			return strings.EqualFold(a.config.EffectiveIssueType(&a.config.Issues[i]), "Epic")
-		}
-	}
-	return false
-}
-
 // BuildDependencyGraph builds a dependency graph and returns issues in creation order.
 func BuildDependencyGraph(issues []config.Issue) ([]config.Issue, error) {
 	issueMap := make(map[string]*config.Issue)
@@ -619,10 +626,13 @@ func BuildDependencyGraph(issues []config.Issue) ([]config.Issue, error) {
 		}
 	}
 
-	// Build ordered result
+	// Build ordered result — skip any IDs that aren't in the config (e.g.
+	// unknown dependsOn references that slipped past validation).
 	ordered := make([]config.Issue, 0, len(result))
 	for _, id := range result {
-		ordered = append(ordered, *issueMap[id])
+		if issue, ok := issueMap[id]; ok {
+			ordered = append(ordered, *issue)
+		}
 	}
 
 	return ordered, nil
