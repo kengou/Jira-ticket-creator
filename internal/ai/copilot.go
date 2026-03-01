@@ -13,6 +13,13 @@ import (
 	copilot "github.com/github/copilot-sdk/go"
 )
 
+// denyAllPermissions is a restrictive permission handler that denies every
+// permission request from the Copilot agent. YAML generation does not require
+// filesystem writes, shell execution, or network access beyond the Copilot API.
+func denyAllPermissions(_ copilot.PermissionRequest, _ copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
+	return copilot.PermissionRequestResult{}, errors.New("permission denied: jira-ai-creator does not grant Copilot agent permissions")
+}
+
 type copilotProvider struct {
 	cliPath   string
 	model     string
@@ -49,7 +56,7 @@ func (p *copilotProvider) Generate(ctx context.Context, userPrompt string) (stri
 	defer client.Stop() //nolint:errcheck
 
 	sessionCfg := &copilot.SessionConfig{
-		OnPermissionRequest: copilot.PermissionHandler.ApproveAll,
+		OnPermissionRequest: denyAllPermissions,
 		SystemMessage: &copilot.SystemMessageConfig{
 			Mode:    "replace",
 			Content: SystemPrompt(),
@@ -81,28 +88,57 @@ func (p *copilotProvider) Generate(ctx context.Context, userPrompt string) (stri
 //  2. COPILOT_CLI_PATH environment variable
 //  3. "copilot" in PATH
 //  4. VSCode extension directory scan
+//
+// Every candidate path is validated to exist and be executable before use.
 func discoverCopilotCLI(flagPath string) (string, error) {
 	// 1. Explicit flag
 	if flagPath != "" {
+		if err := validateExecutable(flagPath); err != nil {
+			return "", fmt.Errorf("--copilot-path %q: %w", flagPath, err)
+		}
 		return flagPath, nil
 	}
 
 	// 2. COPILOT_CLI_PATH env var
 	if envPath := os.Getenv("COPILOT_CLI_PATH"); envPath != "" {
+		if err := validateExecutable(envPath); err != nil {
+			return "", fmt.Errorf("COPILOT_CLI_PATH %q: %w", envPath, err)
+		}
 		return envPath, nil
 	}
 
-	// 3. PATH lookup
+	// 3. PATH lookup — exec.LookPath returns the absolute path; Go 1.19+ no
+	// longer resolves binaries in the current working directory on Unix.
 	if p, err := exec.LookPath("copilot"); err == nil {
-		return p, nil
+		if validateExecutable(p) == nil {
+			return p, nil
+		}
 	}
 
 	// 4. VSCode extension directory
 	if p := findCopilotInVSCode(); p != "" {
-		return p, nil
+		if validateExecutable(p) == nil {
+			return p, nil
+		}
 	}
 
 	return "", errors.New("copilot CLI binary not found in PATH or VSCode extension directories")
+}
+
+// validateExecutable checks that a path points to an existing, executable file.
+func validateExecutable(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("not found: %w", err)
+	}
+	if info.IsDir() {
+		return errors.New("path is a directory, not an executable file")
+	}
+	// Check execute bit (owner, group, or other) on Unix.
+	if info.Mode()&0o111 == 0 {
+		return errors.New("file is not executable")
+	}
+	return nil
 }
 
 // findCopilotInVSCode scans the VSCode extensions directory for the Copilot agent binary.

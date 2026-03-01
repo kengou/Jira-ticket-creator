@@ -179,7 +179,11 @@ func (a *Applier) createIssue(issue *config.Issue, index, total int) (bool, erro
 	}
 
 	if a.verbose {
-		fmt.Printf("  📝 Fields: %+v\n", fields)
+		keys := make([]string, 0, len(fields))
+		for k := range fields {
+			keys = append(keys, k)
+		}
+		fmt.Printf("  📝 Fields (%d): %v\n", len(fields), keys)
 	}
 
 	// Dry run

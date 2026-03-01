@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -76,6 +77,11 @@ func requireAuth() error {
 	}
 	if jiraToken == "" {
 		return errors.New("jira token is required (use --token or set JIRA_TOKEN)")
+	}
+	// Warn when the token was provided via the CLI flag rather than the env var.
+	// CLI arguments are visible in process listings (ps aux) and shell history.
+	if jiraToken != "" && os.Getenv("JIRA_TOKEN") != jiraToken {
+		fmt.Fprintln(os.Stderr, "⚠️  Warning: --token passed on command line is visible in process listings; prefer setting JIRA_TOKEN env var")
 	}
 	return nil
 }

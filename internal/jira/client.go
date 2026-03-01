@@ -6,6 +6,7 @@ package jira
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -46,10 +47,28 @@ func WithTimeout(d time.Duration) ClientOption {
 
 // normalizeURL ensures the base URL has an https scheme and no trailing slash.
 // If no scheme is present, https:// is prepended. Trailing slashes are stripped.
-func normalizeURL(rawURL string) string {
+// Returns an error if an explicit http:// scheme is used, which would send the
+// Bearer token in plaintext.
+func normalizeURL(rawURL string) (string, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
-		return rawURL
+		return rawURL, nil
+	}
+
+	// Reject explicit http:// for non-loopback addresses — Bearer tokens must
+	// not be sent in plaintext over the network.
+	if strings.HasPrefix(rawURL, "http://") {
+		host := strings.TrimPrefix(rawURL, "http://")
+		// Strip port if present
+		if idx := strings.IndexByte(host, '/'); idx >= 0 {
+			host = host[:idx]
+		}
+		if idx := strings.LastIndexByte(host, ':'); idx >= 0 {
+			host = host[:idx]
+		}
+		if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+			return "", errors.New("http:// is not allowed for non-loopback addresses; use https:// to protect your token")
+		}
 	}
 
 	// Prepend https:// if no scheme is present
@@ -60,7 +79,7 @@ func normalizeURL(rawURL string) string {
 	// Strip trailing slashes
 	rawURL = strings.TrimRight(rawURL, "/")
 
-	return rawURL
+	return rawURL, nil
 }
 
 // NewClient creates a new Jira client.
@@ -71,8 +90,15 @@ func NewClient(baseURL, token string, isCloud bool, opts ...ClientOption) *Clien
 		apiVersion = "3"
 	}
 
+	normalizedURL, err := normalizeURL(baseURL)
+	if err != nil {
+		// Panic here to make the misconfiguration obvious at startup rather than
+		// silently sending tokens over plaintext HTTP.
+		panic("jira: " + err.Error())
+	}
+
 	c := &Client{
-		baseURL:    normalizeURL(baseURL),
+		baseURL:    normalizedURL,
 		token:      token,
 		apiVersion: apiVersion,
 		httpClient: &http.Client{
@@ -294,7 +320,11 @@ type APIError struct {
 }
 
 func (e *APIError) Error() string {
-	return fmt.Sprintf("API error (%d): %s", e.StatusCode, e.Body)
+	body := e.Body
+	if len(body) > 500 {
+		body = body[:500] + "... (truncated)"
+	}
+	return fmt.Sprintf("API error (%d): %s", e.StatusCode, body)
 }
 
 // BuildIssueFields builds the fields map for issue creation.

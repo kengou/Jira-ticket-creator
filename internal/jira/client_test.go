@@ -51,79 +51,86 @@ func TestNewClient_WithOptions(t *testing.T) {
 // --- normalizeURL ---
 
 func TestNormalizeURL_AddsScheme(t *testing.T) {
-	got := normalizeURL("jira.example.com")
-	if got != testBaseURL {
-		t.Errorf("normalizeURL('jira.example.com') = %q, want 'https://jira.example.com'", got)
+	got, err := normalizeURL("jira.example.com")
+	if err != nil || got != testBaseURL {
+		t.Errorf("normalizeURL('jira.example.com') = %q, %v; want %q, nil", got, err, testBaseURL)
 	}
 }
 
 func TestNormalizeURL_PreservesHTTPS(t *testing.T) {
-	got := normalizeURL(testBaseURL)
-	if got != testBaseURL {
-		t.Errorf("normalizeURL('https://jira.example.com') = %q", got)
+	got, err := normalizeURL(testBaseURL)
+	if err != nil || got != testBaseURL {
+		t.Errorf("normalizeURL('https://jira.example.com') = %q, %v", got, err)
 	}
 }
 
-func TestNormalizeURL_PreservesHTTP(t *testing.T) {
-	got := normalizeURL("http://localhost:8080")
-	if got != "http://localhost:8080" {
-		t.Errorf("normalizeURL('http://localhost:8080') = %q", got)
+func TestNormalizeURL_RejectsHTTPNonLoopback(t *testing.T) {
+	_, err := normalizeURL("http://jira.example.com")
+	if err == nil {
+		t.Error("normalizeURL('http://jira.example.com') expected error, got nil")
+	}
+}
+
+func TestNormalizeURL_AllowsHTTPLoopback(t *testing.T) {
+	got, err := normalizeURL("http://localhost:8080")
+	if err != nil || got != "http://localhost:8080" {
+		t.Errorf("normalizeURL('http://localhost:8080') = %q, %v; want 'http://localhost:8080', nil", got, err)
 	}
 }
 
 func TestNormalizeURL_StripsTrailingSlash(t *testing.T) {
-	got := normalizeURL(testBaseURL + "/")
-	if got != testBaseURL {
-		t.Errorf("normalizeURL('https://jira.example.com/') = %q", got)
+	got, err := normalizeURL(testBaseURL + "/")
+	if err != nil || got != testBaseURL {
+		t.Errorf("normalizeURL('https://jira.example.com/') = %q, %v", got, err)
 	}
 }
 
 func TestNormalizeURL_StripsMultipleTrailingSlashes(t *testing.T) {
-	got := normalizeURL(testBaseURL + "///")
-	if got != testBaseURL {
-		t.Errorf("normalizeURL('https://jira.example.com///') = %q", got)
+	got, err := normalizeURL(testBaseURL + "///")
+	if err != nil || got != testBaseURL {
+		t.Errorf("normalizeURL('https://jira.example.com///') = %q, %v", got, err)
 	}
 }
 
 func TestNormalizeURL_NoSchemeWithTrailingSlash(t *testing.T) {
-	got := normalizeURL("jira.example.com/")
-	if got != testBaseURL {
-		t.Errorf("normalizeURL('jira.example.com/') = %q", got)
+	got, err := normalizeURL("jira.example.com/")
+	if err != nil || got != testBaseURL {
+		t.Errorf("normalizeURL('jira.example.com/') = %q, %v", got, err)
 	}
 }
 
 func TestNormalizeURL_EmptyString(t *testing.T) {
-	got := normalizeURL("")
-	if got != "" {
-		t.Errorf("normalizeURL('') = %q, want empty", got)
+	got, err := normalizeURL("")
+	if err != nil || got != "" {
+		t.Errorf("normalizeURL('') = %q, %v; want empty, nil", got, err)
 	}
 }
 
 func TestNormalizeURL_WhitespaceOnly(t *testing.T) {
-	got := normalizeURL("  ")
-	if got != "" {
-		t.Errorf("normalizeURL('  ') = %q, want empty", got)
+	got, err := normalizeURL("  ")
+	if err != nil || got != "" {
+		t.Errorf("normalizeURL('  ') = %q, %v; want empty, nil", got, err)
 	}
 }
 
 func TestNormalizeURL_TrimsWhitespace(t *testing.T) {
-	got := normalizeURL("  jira.example.com  ")
-	if got != testBaseURL {
-		t.Errorf("normalizeURL('  jira.example.com  ') = %q", got)
+	got, err := normalizeURL("  jira.example.com  ")
+	if err != nil || got != testBaseURL {
+		t.Errorf("normalizeURL('  jira.example.com  ') = %q, %v", got, err)
 	}
 }
 
 func TestNormalizeURL_WithPath(t *testing.T) {
-	got := normalizeURL("jira.example.com/context-path")
-	if got != "https://jira.example.com/context-path" {
-		t.Errorf("normalizeURL('jira.example.com/context-path') = %q", got)
+	got, err := normalizeURL("jira.example.com/context-path")
+	if err != nil || got != "https://jira.example.com/context-path" {
+		t.Errorf("normalizeURL('jira.example.com/context-path') = %q, %v", got, err)
 	}
 }
 
 func TestNormalizeURL_WithPort(t *testing.T) {
-	got := normalizeURL("jira.example.com:8443")
-	if got != "https://jira.example.com:8443" {
-		t.Errorf("normalizeURL('jira.example.com:8443') = %q", got)
+	got, err := normalizeURL("jira.example.com:8443")
+	if err != nil || got != "https://jira.example.com:8443" {
+		t.Errorf("normalizeURL('jira.example.com:8443') = %q, %v", got, err)
 	}
 }
 

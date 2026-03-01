@@ -65,6 +65,12 @@ func runAI() error {
 		return errors.New("--prompt / -p is required")
 	}
 
+	// Warn when the API key was provided via CLI flag — it is visible in process
+	// listings (ps aux) and shell history. Prefer the ANTHROPIC_API_KEY env var.
+	if aiClaudeKey != "" && aiClaudeKey != os.Getenv("ANTHROPIC_API_KEY") {
+		fmt.Fprintln(os.Stderr, "⚠️  Warning: --claude-key passed on command line is visible in process listings; prefer setting ANTHROPIC_API_KEY env var")
+	}
+
 	provider, err := ai.NewProvider(ai.Config{
 		UseClaude:   aiUseClaude,
 		UseOpencode: aiUseOpencode,
