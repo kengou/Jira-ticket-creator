@@ -265,6 +265,17 @@ func validateBusinessLogic(cfg *config.Config) []ValidationError {
 						Severity: "warning",
 					})
 				}
+
+				// Warn if both parent (epic) and epicLink are set — epicLink will silently win
+				parentType := cfg.EffectiveIssueType(parent)
+				if strings.EqualFold(parentType, "Epic") && issue.EpicLink != "" {
+					errors = append(errors, ValidationError{
+						IssueID:  issue.ID,
+						Field:    "epicLink",
+						Message:  fmt.Sprintf("both parent %q (Epic) and epicLink %q are set; epicLink will override the parent epic link", issue.Parent, issue.EpicLink),
+						Severity: "warning",
+					})
+				}
 			}
 		}
 	}
@@ -322,7 +333,8 @@ func validateTemplates(cfg *config.Config) []ValidationError {
 	}
 
 	for _, issue := range cfg.Issues {
-		requiredFields := cfg.Validation.RequiredFields[issue.IssueType]
+		effectiveType := cfg.EffectiveIssueType(&issue)
+		requiredFields := cfg.Validation.RequiredFields[effectiveType]
 		if len(requiredFields) == 0 {
 			continue
 		}
@@ -336,7 +348,7 @@ func validateTemplates(cfg *config.Config) []ValidationError {
 					errors = append(errors, ValidationError{
 						IssueID:  issue.ID,
 						Field:    "templateVars",
-						Message:  fmt.Sprintf("required template variable %q missing for issue type %s", field, issue.IssueType),
+						Message:  fmt.Sprintf("required template variable %q missing for issue type %s", field, effectiveType),
 						Severity: "error",
 					})
 				}

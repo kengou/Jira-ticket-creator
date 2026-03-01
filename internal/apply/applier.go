@@ -275,7 +275,7 @@ func (a *Applier) buildIssueFields(issue *config.Issue) (map[string]any, error) 
 	}
 
 	// Epic name (required for Epic issue type)
-	if issue.IssueType == "Epic" && issue.EpicName != "" {
+	if strings.EqualFold(a.config.EffectiveIssueType(issue), "Epic") && issue.EpicName != "" {
 		fields[a.getEpicNameFieldID()] = issue.EpicName
 	}
 
@@ -530,6 +530,9 @@ func truncate(s string, maxLen int) string {
 	runes := []rune(s)
 	if len(runes) <= maxLen {
 		return s
+	}
+	if maxLen <= 3 {
+		return string(runes[:maxLen])
 	}
 	return string(runes[:maxLen-3]) + "..."
 }

@@ -206,13 +206,15 @@ func (c *Client) doRequest(method, endpoint string, body any, result any) error 
 
 	fullURL := c.baseURL + endpoint
 	var lastErr error
+	rateLimited := false // true when previous attempt got a 429 and already slept
 
 	for attempt := 0; attempt <= c.MaxRetries; attempt++ {
-		if attempt > 0 {
+		if attempt > 0 && !rateLimited {
 			// Exponential backoff: 1s, 4s, 9s
 			delay := time.Duration(attempt*attempt) * c.RetryDelay
 			time.Sleep(delay)
 		}
+		rateLimited = false
 
 		// Reset body reader for each attempt
 		if bodyBytes != nil {
@@ -252,12 +254,13 @@ func (c *Client) doRequest(method, endpoint string, body any, result any) error 
 			return nil
 		}
 
-		// Rate limiting - retry with backoff guidance from server
+		// Rate limiting - retry using server's Retry-After guidance only
 		if resp.StatusCode == http.StatusTooManyRequests {
 			retryAfter := c.parseRetryAfter(resp.Header.Get("Retry-After"))
 			delay := time.Duration(retryAfter) * time.Second
 			lastErr = fmt.Errorf("rate limited (429); waiting %d seconds", retryAfter)
 			time.Sleep(delay)
+			rateLimited = true
 			continue
 		}
 

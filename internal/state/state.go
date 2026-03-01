@@ -109,15 +109,20 @@ func (s *State) GetRecord(internalID string) (IssueRecord, bool) {
 	return record, ok
 }
 
-// AddIssue records a newly created issue.
+// AddIssue records a newly created issue. If the issue already exists in state,
+// the original CreatedAt timestamp is preserved.
 func (s *State) AddIssue(internalID, jiraKey, issueType, summary, epicLink, configFile string) {
+	createdAt := time.Now()
+	if existing, ok := s.IssueMapping[internalID]; ok {
+		createdAt = existing.CreatedAt
+	}
 	s.IssueMapping[internalID] = IssueRecord{
 		JiraKey:    jiraKey,
 		InternalID: internalID,
 		IssueType:  issueType,
 		Summary:    summary,
 		EpicLink:   epicLink,
-		CreatedAt:  time.Now(),
+		CreatedAt:  createdAt,
 		ConfigFile: configFile,
 	}
 }
