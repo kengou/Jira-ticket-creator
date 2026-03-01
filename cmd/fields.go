@@ -2,7 +2,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -49,13 +48,7 @@ func init() {
 
 // validateFieldsFlags checks that required flags for the fields command are set.
 func validateFieldsFlags() error {
-	if jiraURL == "" {
-		return errors.New("jira URL is required (use --jira-url or set JIRA_URL)")
-	}
-	if jiraToken == "" {
-		return errors.New("jira token is required (use --token or set JIRA_TOKEN)")
-	}
-	return nil
+	return requireAuth()
 }
 
 // matchFields filters and returns fields matching the current search/custom criteria.

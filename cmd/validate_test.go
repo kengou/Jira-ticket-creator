@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/kengou/Jira-ticket-creator/internal/config"
+	"github.com/kengou/Jira-ticket-creator/internal/jira"
 )
 
 // --- validateConfig ---
@@ -281,13 +282,13 @@ func TestValidateBusinessLogic_InvalidLinkTargetStillErrors(t *testing.T) {
 	}
 }
 
-// --- isJiraKey ---
+// --- jira.IsJiraKey ---
 
 func TestIsJiraKey_Valid(t *testing.T) {
 	keys := []string{"POM-1", "POM-1052", "ABC-123", "A1-1", "PROJ-99999"}
 	for _, k := range keys {
-		if !isJiraKey(k) {
-			t.Errorf("isJiraKey(%q) = false, want true", k)
+		if !jira.IsJiraKey(k) {
+			t.Errorf("jira.IsJiraKey(%q) = false, want true", k)
 		}
 	}
 }
@@ -295,8 +296,8 @@ func TestIsJiraKey_Valid(t *testing.T) {
 func TestIsJiraKey_Invalid(t *testing.T) {
 	notKeys := []string{"task-1", "my-story", "STORY-PLAT-005", "pom-1", "POM", "POM-", "-123", "123", ""}
 	for _, k := range notKeys {
-		if isJiraKey(k) {
-			t.Errorf("isJiraKey(%q) = true, want false", k)
+		if jira.IsJiraKey(k) {
+			t.Errorf("jira.IsJiraKey(%q) = true, want false", k)
 		}
 	}
 }

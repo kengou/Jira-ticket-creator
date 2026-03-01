@@ -87,7 +87,7 @@ func (s *State) Save() error {
 		return fmt.Errorf("marshal state: %w", err)
 	}
 
-	if err := os.WriteFile(s.savePath, data, 0644); err != nil {
+	if err := os.WriteFile(s.savePath, data, 0600); err != nil {
 		return fmt.Errorf("write state file: %w", err)
 	}
 

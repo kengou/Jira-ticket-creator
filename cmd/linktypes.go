@@ -2,7 +2,6 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -45,13 +44,7 @@ func init() {
 
 // validateLinkTypesFlags checks that required flags for the linktypes command are set.
 func validateLinkTypesFlags() error {
-	if jiraURL == "" {
-		return errors.New("jira URL is required (use --jira-url or set JIRA_URL)")
-	}
-	if jiraToken == "" {
-		return errors.New("jira token is required (use --token or set JIRA_TOKEN)")
-	}
-	return nil
+	return requireAuth()
 }
 
 // matchLinkTypes filters link types by the search string (case-insensitive).

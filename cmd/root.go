@@ -72,20 +72,24 @@ func maskToken(token string) string {
 	return token[:4] + "****"
 }
 
+// requireAuth checks that Jira authentication flags are set.
+func requireAuth() error {
+	if jiraURL == "" {
+		return errors.New("jira URL is required (use --jira-url or set JIRA_URL)")
+	}
+	if jiraToken == "" {
+		return errors.New("jira token is required (use --token or set JIRA_TOKEN)")
+	}
+	return nil
+}
+
 // validateFlags checks that required flags are set.
 func validateFlags(needsAuth bool) error {
 	if configFile == "" {
 		return errors.New("config file is required (use -f or --file)")
 	}
-
 	if needsAuth {
-		if jiraURL == "" {
-			return errors.New("jira URL is required (use --jira-url or set JIRA_URL)")
-		}
-		if jiraToken == "" {
-			return errors.New("jira token is required (use --token or set JIRA_TOKEN)")
-		}
+		return requireAuth()
 	}
-
 	return nil
 }

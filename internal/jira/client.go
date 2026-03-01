@@ -234,6 +234,8 @@ func (c *Client) doRequest(method, endpoint string, body any, result any) error 
 			continue
 		}
 
+		// resp.Body is read and closed explicitly (not deferred) because this
+		// retry loop may create multiple responses; defer would leak bodies across attempts.
 		respBody, readErr := io.ReadAll(resp.Body)
 		if closeErr := resp.Body.Close(); closeErr != nil && readErr == nil {
 			readErr = closeErr

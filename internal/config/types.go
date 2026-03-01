@@ -48,7 +48,6 @@ type Validation struct {
 type Options struct {
 	DryRun             bool  `yaml:"dryRun,omitempty"`
 	ContinueOnError    bool  `yaml:"continueOnError,omitempty"`
-	MaxConcurrency     int   `yaml:"maxConcurrency,omitempty"`
 	IdempotencyEnabled *bool `yaml:"idempotencyEnabled,omitempty"`
 	Verbose            bool  `yaml:"verbose,omitempty"`
 }
@@ -123,9 +122,6 @@ func LoadConfig(path string) (*Config, error) {
 func (c *Config) applyDefaults() {
 	if c.Options == nil {
 		c.Options = &Options{}
-	}
-	if c.Options.MaxConcurrency == 0 {
-		c.Options.MaxConcurrency = 5
 	}
 	if c.Validation == nil {
 		c.Validation = &Validation{}

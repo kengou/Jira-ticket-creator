@@ -4,6 +4,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -41,17 +42,14 @@ func init() {
 	epicsCmd.Flags().StringVarP(&epicStatus, "status", "s", "", "Filter by status (e.g. \"In Progress\", \"NOT:Done\" to negate)")
 	epicsCmd.Flags().StringVarP(&epicsOutputFile, "output", "o", "", "Save epics to a YAML file (jira-ai-creator schema format)")
 	if err := epicsCmd.MarkFlagRequired("project"); err != nil {
-		panic(err)
+		log.Fatalf("internal error: failed to mark flag required: %v", err)
 	}
 }
 
 // validateEpicsFlags checks that required flags for the epics command are set.
 func validateEpicsFlags() error {
-	if jiraURL == "" {
-		return errors.New("jira URL is required (use --jira-url or set JIRA_URL)")
-	}
-	if jiraToken == "" {
-		return errors.New("jira token is required (use --token or set JIRA_TOKEN)")
+	if err := requireAuth(); err != nil {
+		return err
 	}
 	if projectKey == "" {
 		return errors.New("project key is required (use -p or --project)")
@@ -139,7 +137,7 @@ func runEpics() error {
 			return fmt.Errorf("failed to marshal epics to YAML: %w", err)
 		}
 
-		if err := os.WriteFile(epicsOutputFile, yamlData, 0644); err != nil {
+		if err := os.WriteFile(epicsOutputFile, yamlData, 0600); err != nil {
 			return fmt.Errorf("failed to write YAML file %q: %w", epicsOutputFile, err)
 		}
 

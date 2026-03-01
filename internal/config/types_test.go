@@ -62,9 +62,6 @@ func TestApplyDefaults_SetsOptionsWhenNil(t *testing.T) {
 	if cfg.Options == nil {
 		t.Fatal("Options should not be nil after applyDefaults")
 	}
-	if cfg.Options.MaxConcurrency != 5 {
-		t.Errorf("MaxConcurrency = %d, want 5", cfg.Options.MaxConcurrency)
-	}
 	if cfg.Validation == nil {
 		t.Fatal("Validation should not be nil after applyDefaults")
 	}
@@ -72,25 +69,12 @@ func TestApplyDefaults_SetsOptionsWhenNil(t *testing.T) {
 
 func TestApplyDefaults_PreservesExistingOptions(t *testing.T) {
 	cfg := &Config{
-		Options: &Options{
-			MaxConcurrency: 10,
-		},
+		Options: &Options{ContinueOnError: true},
 	}
 	cfg.applyDefaults()
 
-	if cfg.Options.MaxConcurrency != 10 {
-		t.Errorf("MaxConcurrency = %d, want 10 (should be preserved)", cfg.Options.MaxConcurrency)
-	}
-}
-
-func TestApplyDefaults_SetsMaxConcurrencyWhenZero(t *testing.T) {
-	cfg := &Config{
-		Options: &Options{MaxConcurrency: 0},
-	}
-	cfg.applyDefaults()
-
-	if cfg.Options.MaxConcurrency != 5 {
-		t.Errorf("MaxConcurrency = %d, want 5 (default)", cfg.Options.MaxConcurrency)
+	if !cfg.Options.ContinueOnError {
+		t.Error("ContinueOnError should be preserved by applyDefaults")
 	}
 }
 
@@ -382,9 +366,6 @@ issues:
 	// Options should be auto-populated
 	if cfg.Options == nil {
 		t.Fatal("Options should be set by applyDefaults")
-	}
-	if cfg.Options.MaxConcurrency != 5 {
-		t.Errorf("MaxConcurrency = %d, want 5", cfg.Options.MaxConcurrency)
 	}
 	// Idempotency should default to enabled
 	if !cfg.Options.IsIdempotencyEnabled() {

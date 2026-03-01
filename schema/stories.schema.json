@@ -139,12 +139,6 @@
           "type": "boolean",
           "default": false,
           "description": "Enable verbose output"
-        },
-        "maxConcurrency": {
-          "type": "integer",
-          "default": 5,
-          "minimum": 1,
-          "description": "Maximum concurrent API requests (reserved for future use)"
         }
       }
     },

@@ -4,9 +4,9 @@
 package apply
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/kengou/Jira-ticket-creator/internal/config"
@@ -14,13 +14,17 @@ import (
 	"github.com/kengou/Jira-ticket-creator/internal/state"
 )
 
-// jiraKeyPattern matches Jira issue keys like "POM-1052", "ABC-1", etc.
-var jiraKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]+-\d+$`)
+// JiraClient is the subset of the Jira API used by Applier.
+type JiraClient interface {
+	CreateIssue(req *jira.CreateIssueRequest) (*jira.CreateIssueResponse, error)
+	CreateIssueLink(req *jira.IssueLinkRequest) error
+	FetchIssueLinkTypes() ([]jira.IssueLinkTypeInfo, error)
+}
 
 // Applier creates issues in Jira according to a configuration.
 type Applier struct {
 	config     *config.Config
-	client     *jira.Client
+	client     JiraClient
 	state      *state.State
 	configFile string
 
@@ -34,7 +38,7 @@ type Applier struct {
 }
 
 // NewApplier creates a new Applier.
-func NewApplier(cfg *config.Config, client *jira.Client, verbose, dryRun bool, configFile string) *Applier {
+func NewApplier(cfg *config.Config, client JiraClient, verbose, dryRun bool, configFile string) *Applier {
 	continueOnError := false
 	if cfg.Options != nil {
 		continueOnError = cfg.Options.ContinueOnError
@@ -341,6 +345,7 @@ func (a *Applier) createIssueLinks() error {
 	}
 
 	var linkCount int
+	var errs []error
 
 	for _, issue := range a.config.Issues {
 		if len(issue.Links) == 0 {
@@ -357,7 +362,7 @@ func (a *Applier) createIssueLinks() error {
 			if !ok {
 				// If the target looks like an existing Jira key (e.g. POM-1052),
 				// use it directly — this allows linking to issues that already exist in Jira.
-				if jiraKeyPattern.MatchString(link.Target) {
+				if jira.IsJiraKey(link.Target) {
 					targetKey = link.Target
 				} else {
 					fmt.Printf("⚠️  Cannot link %s to %s: target not created\n", issue.ID, link.Target)
@@ -374,6 +379,7 @@ func (a *Applier) createIssueLinks() error {
 			resolved, err := resolveLinkType(link.Type, linkTypes)
 			if err != nil {
 				fmt.Printf("⚠️  Failed to link %s -> %s: %v\n", sourceKey, targetKey, err)
+				errs = append(errs, fmt.Errorf("link %s -> %s: %w", sourceKey, targetKey, err))
 				continue
 			}
 
@@ -403,6 +409,7 @@ func (a *Applier) createIssueLinks() error {
 
 			if err := a.client.CreateIssueLink(req); err != nil {
 				fmt.Printf("⚠️  Failed to link %s -> %s: %v\n", sourceKey, targetKey, err)
+				errs = append(errs, fmt.Errorf("link %s -> %s: %w", sourceKey, targetKey, err))
 				continue
 			}
 
@@ -417,7 +424,7 @@ func (a *Applier) createIssueLinks() error {
 		fmt.Printf("\n🔗 Created %d issue links\n", linkCount)
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 // matchType indicates how a user's link type text matched a Jira link type.

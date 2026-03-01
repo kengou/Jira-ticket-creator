@@ -4,13 +4,13 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"regexp"
 	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/kengou/Jira-ticket-creator/internal/config"
+	"github.com/kengou/Jira-ticket-creator/internal/jira"
 )
 
 // ValidationError represents a single validation error.
@@ -286,7 +286,7 @@ func validateBusinessLogic(cfg *config.Config) []ValidationError {
 	for _, issue := range cfg.Issues {
 		for _, link := range issue.Links {
 			// Allow both internal IDs (defined in this file) and external Jira keys (e.g. POM-1052)
-			if !idMap[link.Target] && !isJiraKey(link.Target) {
+			if !idMap[link.Target] && !jira.IsJiraKey(link.Target) {
 				errors = append(errors, ValidationError{
 					IssueID:  issue.ID,
 					Field:    "links",
@@ -432,14 +432,6 @@ func isCommonLinkType(linkType string) bool {
 		"depends on", "is depended on by",
 	}
 	return slices.Contains(commonTypes, strings.ToLower(linkType))
-}
-
-// jiraKeyPattern matches Jira issue keys like "POM-1052", "ABC-1", etc.
-var jiraKeyPattern = regexp.MustCompile(`^[A-Z][A-Z0-9]+-\d+$`)
-
-// isJiraKey returns true if the string looks like an existing Jira issue key (e.g. "POM-1052").
-func isJiraKey(s string) bool {
-	return jiraKeyPattern.MatchString(s)
 }
 
 // validateParentChild checks if parent-child issue type combination is valid in Jira.
