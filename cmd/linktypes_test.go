@@ -9,6 +9,8 @@ import (
 func TestValidateLinkTypesFlags_NoURL(t *testing.T) {
 	origURL := jiraURL
 	origToken := jiraToken
+	t.Setenv("JIRA_URL", "")
+	t.Setenv("JIRA_TOKEN", "")
 	defer func() { jiraURL = origURL; jiraToken = origToken }()
 
 	jiraURL = ""
@@ -22,6 +24,8 @@ func TestValidateLinkTypesFlags_NoURL(t *testing.T) {
 func TestValidateLinkTypesFlags_NoToken(t *testing.T) {
 	origURL := jiraURL
 	origToken := jiraToken
+	t.Setenv("JIRA_URL", "")
+	t.Setenv("JIRA_TOKEN", "")
 	defer func() { jiraURL = origURL; jiraToken = origToken }()
 
 	jiraURL = testJiraURL

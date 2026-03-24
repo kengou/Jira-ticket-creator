@@ -8,11 +8,14 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/kengou/Jira-ticket-creator/internal/ai"
 	"github.com/kengou/Jira-ticket-creator/internal/config"
+	"github.com/kengou/Jira-ticket-creator/internal/source"
+	"github.com/kengou/Jira-ticket-creator/internal/validation"
 )
 
 var (
@@ -25,6 +28,10 @@ var (
 	aiClaudeKey   string
 	aiCopilotPath string
 	aiMaxTokens   int
+	aiSourceDir   string
+	aiTimeout     int
+	aiYes         bool
+	aiIncludeDocs bool
 )
 
 var aiCmd = &cobra.Command{
@@ -52,13 +59,34 @@ func init() {
 	aiCmd.Flags().BoolVar(&aiUseCopilot, "copilot", false, "Use GitHub Copilot CLI or VSCode extension")
 	aiCmd.Flags().StringVarP(&aiPrompt, "prompt", "p", "", "Plain-English description of the Jira plan to generate (required)")
 	aiCmd.Flags().StringVarP(&aiOutput, "output", "o", "", "Output YAML file path (default: stdout)")
-	aiCmd.Flags().StringVar(&aiModel, "model", "", "Override AI model (provider-specific)")
+	aiCmd.Flags().StringVar(&aiModel, "model", os.Getenv("JIRA_AI_MODEL"), "Override AI model; env: JIRA_AI_MODEL (Claude/Copilot: model name; OpenCode: provider/modelID)")
 	aiCmd.Flags().StringVar(&aiClaudeKey, "claude-key", "", "Anthropic API key (default: ANTHROPIC_API_KEY env)")
 	aiCmd.Flags().StringVar(&aiCopilotPath, "copilot-path", "", "Path to Copilot agent binary (default: auto-detected)")
 	aiCmd.Flags().IntVar(&aiMaxTokens, "max-tokens", 4096, "Maximum tokens in AI response")
+	aiCmd.Flags().StringVarP(&aiSourceDir, "source-dir", "d", "", "Source directory to analyse and include as context for the AI")
+	aiCmd.Flags().IntVar(&aiTimeout, "timeout", 120, "Timeout in seconds for AI generation")
+	aiCmd.Flags().BoolVar(&aiYes, "yes", false, "Skip confirmation prompts (e.g. before sending source files to AI)")
+	aiCmd.Flags().BoolVar(&aiIncludeDocs, "include-docs", false, "Include .md and .txt files when scanning --source-dir (excluded by default to reduce prompt injection risk)")
+
+	// Hide --claude-key from help output to discourage passing secrets via CLI flags.
+	// Users should prefer the ANTHROPIC_API_KEY environment variable.
+	if err := aiCmd.Flags().MarkHidden("claude-key"); err != nil {
+		panic("jira-ai-creator: " + err.Error())
+	}
 }
 
-var yamlFenceRe = regexp.MustCompile("(?m)^```(?:yaml)?\\s*\\n?|^```\\s*$")
+// yamlFencedBlockRe matches a fenced code block that optionally starts with ```yaml.
+// Capture group 1 contains the block content.
+var yamlFencedBlockRe = regexp.MustCompile("(?ms)^```(?:yaml)?[ \t]*\n(.*?)\n^```[ \t]*$")
+
+// extractYAML returns the content of the first fenced YAML block in s,
+// or the full string trimmed if no fences are found.
+func extractYAML(s string) string {
+	if m := yamlFencedBlockRe.FindStringSubmatch(s); m != nil {
+		return strings.TrimSpace(m[1])
+	}
+	return strings.TrimSpace(s)
+}
 
 func runAI() error {
 	if aiPrompt == "" {
@@ -68,7 +96,7 @@ func runAI() error {
 	// Warn when the API key was provided via CLI flag — it is visible in process
 	// listings (ps aux) and shell history. Prefer the ANTHROPIC_API_KEY env var.
 	if aiClaudeKey != "" && aiClaudeKey != os.Getenv("ANTHROPIC_API_KEY") {
-		fmt.Fprintln(os.Stderr, "⚠️  Warning: --claude-key passed on command line is visible in process listings; prefer setting ANTHROPIC_API_KEY env var")
+		fmt.Fprintln(os.Stderr, emoji("⚠️ ", "[WARN]")+" Warning: --claude-key passed on command line is visible in process listings; prefer setting ANTHROPIC_API_KEY env var")
 	}
 
 	provider, err := ai.NewProvider(ai.Config{
@@ -79,37 +107,108 @@ func runAI() error {
 		ClaudeKey:   aiClaudeKey,
 		CopilotPath: aiCopilotPath,
 		MaxTokens:   aiMaxTokens,
+		Verbose:     verbose,
 	})
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("🤖 Generating with %s…\n\n", provider.Name())
+	fmt.Fprintf(os.Stderr, "%s Generating with %s…\n\n", emoji("🤖", "[AI]"), provider.Name())
 
-	raw, err := provider.Generate(context.Background(), aiPrompt)
+	userPrompt := aiPrompt
+	if aiSourceDir != "" {
+		opts := source.BuildOptions{IncludeDocs: aiIncludeDocs}
+		files, err := source.ListFiles(aiSourceDir, opts)
+		if err != nil {
+			return fmt.Errorf("scan source directory: %w", err)
+		}
+		if len(files) == 0 {
+			fmt.Fprintln(os.Stderr, "Warning: --source-dir matched zero files; proceeding without source context")
+		} else {
+			if !aiYes {
+				fmt.Fprintf(os.Stderr, "The following %d file(s) from %q will be sent to the AI provider:\n", len(files), aiSourceDir)
+				for _, f := range files {
+					fmt.Fprintf(os.Stderr, "  %s\n", f)
+				}
+				if !aiIncludeDocs {
+					fmt.Fprintln(os.Stderr, "  (Note: .md and .txt excluded; use --include-docs to include them)")
+				}
+				if !confirmPrompt(os.Stderr, os.Stdin, "\nProceed? [y/N] ") {
+					return errors.New("aborted by user")
+				}
+			}
+			sourceCtx, buildErr := source.BuildContextFromFiles(aiSourceDir, files)
+			if buildErr != nil {
+				return fmt.Errorf("build source context: %w", buildErr)
+			}
+			fmt.Fprintf(os.Stderr, "Included source context from: %s (%d files)\n\n", aiSourceDir, len(files))
+			userPrompt = sourceCtx + "\n\nUSER REQUEST:\n" + aiPrompt
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(aiTimeout)*time.Second)
+	defer cancel()
+
+	spin := newSpinner(fmt.Sprintf("Generating… (timeout %ds)", aiTimeout))
+	spin.Start()
+	raw, err := provider.Generate(ctx, userPrompt)
+	spin.Stop()
 	if err != nil {
 		return fmt.Errorf("generation failed: %w", err)
 	}
 
 	// Strip markdown code fences the AI may have added despite instructions.
-	clean := strings.TrimSpace(yamlFenceRe.ReplaceAllString(raw, ""))
+	clean := extractYAML(raw)
 
-	// Validate the generated YAML before writing.
+	// Schema-validate the raw YAML BEFORE deserialization (OWASP ASVS V5.5).
+	// This rejects unexpected keys, wrong types, and structure violations from a
+	// misbehaving or compromised AI provider before any Go struct is populated
+	// with untrusted data.
+	if schemaErr := validation.ValidateRawYAML([]byte(clean)); schemaErr != nil {
+		if tmpFile, tmpErr := os.CreateTemp("", "jira-ai-creator-*.yaml"); tmpErr == nil {
+			if chmodErr := os.Chmod(tmpFile.Name(), 0600); chmodErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not set permissions on temp file: %v\n", chmodErr)
+			}
+			tmpName := tmpFile.Name()
+			_, writeErr := fmt.Fprint(tmpFile, raw)
+			closeErr := tmpFile.Close()
+			if writeErr == nil && closeErr == nil {
+				fmt.Fprintf(os.Stderr, "Raw AI output saved to: %s\n", tmpName)
+				return fmt.Errorf("AI output failed schema validation: %w", schemaErr)
+			}
+		}
+		return fmt.Errorf("AI output failed schema validation: %w", schemaErr)
+	}
+
+	// Parse the schema-valid YAML into the config struct.
 	cfg, err := config.LoadConfigFromBytes([]byte(clean))
 	if err != nil {
-		return fmt.Errorf("AI output is not valid YAML: %w\n\nRaw output:\n%s", err, raw)
+		// Save raw output to a temp file so the user can inspect it without terminal noise.
+		if tmpFile, tmpErr := os.CreateTemp("", "jira-ai-creator-*.yaml"); tmpErr == nil {
+			if chmodErr := os.Chmod(tmpFile.Name(), 0600); chmodErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not set permissions on temp file: %v\n", chmodErr)
+			}
+			tmpName := tmpFile.Name()
+			_, writeErr := fmt.Fprint(tmpFile, raw)
+			closeErr := tmpFile.Close()
+			if writeErr == nil && closeErr == nil {
+				fmt.Fprintf(os.Stderr, "Raw AI output saved to: %s\n", tmpName)
+				return fmt.Errorf("AI output is not valid YAML: %w", err)
+			}
+		}
+		return fmt.Errorf("AI output is not valid YAML: %w", err)
 	}
 
 	validationErrors := validateConfig(cfg)
 
 	var errorCount, warnCount int
 	for _, e := range validationErrors {
-		if e.Severity == "error" {
+		if e.Severity == validation.SeverityError {
 			errorCount++
-			fmt.Printf("❌ %s\n", e.String())
+			fmt.Fprintf(os.Stderr, "%s %s\n", emoji("❌", "[ERR]"), e.String())
 		} else {
 			warnCount++
-			fmt.Printf("⚠️  %s\n", e.String())
+			fmt.Fprintf(os.Stderr, "%s  %s\n", emoji("⚠️", "[WARN]"), e.String())
 		}
 	}
 
@@ -118,20 +217,26 @@ func runAI() error {
 	}
 
 	if warnCount > 0 {
-		fmt.Printf("\n⚠️  %d warning(s); proceeding.\n\n", warnCount)
+		fmt.Fprintf(os.Stderr, "\n%s  %d warning(s); proceeding.\n\n", emoji("⚠️", "[WARN]"), warnCount)
 	}
+
+	// Prepend AI-generated marker so that `apply` can warn about un-reviewed output.
+	const aiMarker = "# ai-generated: true\n# reviewed: false\n"
+	markedOutput := aiMarker + clean
 
 	// Write output.
 	if aiOutput == "" {
-		fmt.Print(clean)
+		fmt.Print(markedOutput)
 		if !strings.HasSuffix(clean, "\n") {
 			fmt.Println()
 		}
 	} else {
-		if err := os.WriteFile(aiOutput, []byte(clean+"\n"), 0600); err != nil {
+		if err := os.WriteFile(aiOutput, []byte(markedOutput+"\n"), 0600); err != nil {
 			return fmt.Errorf("failed to write output file: %w", err)
 		}
-		fmt.Printf("✅ Saved to %s (%d issues)\n", aiOutput, len(cfg.Issues))
+		fmt.Fprintf(os.Stderr, "Saved to %s (%d issues)\n", aiOutput, len(cfg.Issues))
+		fmt.Fprintln(os.Stderr, "IMPORTANT: Review the generated YAML before running 'apply'.")
+		fmt.Fprintln(os.Stderr, "           Change '# reviewed: false' to '# reviewed: true' after review.")
 	}
 
 	return nil

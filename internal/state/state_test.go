@@ -142,7 +142,7 @@ func TestSave_WritesFile(t *testing.T) {
 		}
 
 		// Verify file exists and is valid JSON
-		data, err := os.ReadFile(filepath.Join(dir, stateFileName)) //nolint:gosec
+		data, err := os.ReadFile(filepath.Clean(filepath.Join(dir, stateFileName)))
 		if err != nil {
 			t.Fatalf("read state file: %v", err)
 		}
@@ -335,8 +335,6 @@ func TestClear_NoErrorWhenFileDoesNotExist(t *testing.T) {
 
 func TestClearForConfig_RemovesFile(t *testing.T) {
 	withTempDir(t, func(cwd string) {
-		configPath := filepath.Join(t.TempDir(), "config.yaml")
-
 		st, err := Load("PROJ")
 		if err != nil {
 			t.Fatalf("Load: %v", err)
@@ -345,7 +343,7 @@ func TestClearForConfig_RemovesFile(t *testing.T) {
 			t.Fatalf("Save: %v", err)
 		}
 
-		if err := ClearForConfig(configPath); err != nil {
+		if err := ClearForConfig(); err != nil {
 			t.Fatalf("ClearForConfig: %v", err)
 		}
 

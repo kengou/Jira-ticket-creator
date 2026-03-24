@@ -54,7 +54,7 @@ func Load(projectKey string) (*State, error) {
 		}, nil
 	}
 
-	data, err := os.ReadFile(statePath) //nolint:gosec
+	data, err := os.ReadFile(filepath.Clean(statePath))
 	if err != nil {
 		return nil, fmt.Errorf("read state file: %w", err)
 	}
@@ -161,8 +161,7 @@ func (s *State) Clear() error {
 }
 
 // ClearForConfig removes the state file in the current working directory.
-// The configFile argument is ignored; it is kept for API compatibility.
-func ClearForConfig(configFile string) error {
+func ClearForConfig() error {
 	statePath := statePathFor()
 	if _, err := os.Stat(statePath); os.IsNotExist(err) {
 		return nil

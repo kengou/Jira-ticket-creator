@@ -66,6 +66,8 @@ func TestValidateEpicsFlags_MissingURL(t *testing.T) {
 	origToken := jiraToken
 	origProject := projectKey
 	origStatus := epicStatus
+	t.Setenv("JIRA_URL", "")
+	t.Setenv("JIRA_TOKEN", "")
 	defer func() {
 		jiraURL = origURL
 		jiraToken = origToken
@@ -87,6 +89,8 @@ func TestValidateEpicsFlags_MissingToken(t *testing.T) {
 	origToken := jiraToken
 	origProject := projectKey
 	origStatus := epicStatus
+	t.Setenv("JIRA_URL", "")
+	t.Setenv("JIRA_TOKEN", "")
 	defer func() {
 		jiraURL = origURL
 		jiraToken = origToken

@@ -1,6 +1,7 @@
 package jira
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,10 +14,37 @@ import (
 
 const testBaseURL = "https://jira.example.com"
 
+// mustNewClient creates a Client for testing. All test URLs use https or loopback
+// http (httptest.NewServer), so no error is expected; Fatalf on failure.
+func mustNewClient(t *testing.T, baseURL, token string, isCloud bool, opts ...ClientOption) *Client {
+	t.Helper()
+	c, err := NewClient(baseURL, token, isCloud, opts...)
+	if err != nil {
+		t.Fatalf("NewClient(%q): %v", baseURL, err)
+	}
+	return c
+}
+
+// encodeJSON writes v as JSON to w and fails the test if encoding fails.
+func encodeJSON(t *testing.T, w http.ResponseWriter, v any) {
+	t.Helper()
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		t.Errorf("json.NewEncoder.Encode: %v", err)
+	}
+}
+
+// writeBytes writes data to w and fails the test if the write fails.
+func writeBytes(t *testing.T, w http.ResponseWriter, data []byte) {
+	t.Helper()
+	if _, err := w.Write(data); err != nil {
+		t.Errorf("w.Write: %v", err)
+	}
+}
+
 // --- NewClient ---
 
 func TestNewClient_DataCenter(t *testing.T) {
-	c := NewClient(testBaseURL, "my-token", false)
+	c := mustNewClient(t, testBaseURL, "my-token", false)
 	if c.apiVersion != "2" {
 		t.Errorf("apiVersion = %q, want %q for Data Center", c.apiVersion, "2")
 	}
@@ -29,14 +57,14 @@ func TestNewClient_DataCenter(t *testing.T) {
 }
 
 func TestNewClient_Cloud(t *testing.T) {
-	c := NewClient("https://jira.atlassian.net", "my-token", true)
+	c := mustNewClient(t, "https://jira.atlassian.net", "my-token", true)
 	if c.apiVersion != "3" {
 		t.Errorf("apiVersion = %q, want %q for Cloud", c.apiVersion, "3")
 	}
 }
 
 func TestNewClient_WithOptions(t *testing.T) {
-	c := NewClient(testBaseURL, "tok", false,
+	c := mustNewClient(t, testBaseURL, "tok", false,
 		WithMaxRetries(5),
 		WithTimeout(60*time.Second),
 	)
@@ -45,6 +73,27 @@ func TestNewClient_WithOptions(t *testing.T) {
 	}
 	if c.httpClient.Timeout != 60*time.Second {
 		t.Errorf("Timeout = %v, want 60s", c.httpClient.Timeout)
+	}
+}
+
+func TestNewClient_DefaultMaxRetryAfterSecs(t *testing.T) {
+	c := mustNewClient(t, testBaseURL, "tok", false)
+	if c.MaxRetryAfterSecs != 60 {
+		t.Errorf("MaxRetryAfterSecs = %d, want 60 (default)", c.MaxRetryAfterSecs)
+	}
+}
+
+func TestNewClient_WithMaxRetryAfterSecs(t *testing.T) {
+	c := mustNewClient(t, testBaseURL, "tok", false, WithMaxRetryAfterSecs(120))
+	if c.MaxRetryAfterSecs != 120 {
+		t.Errorf("MaxRetryAfterSecs = %d, want 120", c.MaxRetryAfterSecs)
+	}
+}
+
+func TestNewClient_RejectsHTTPNonLoopback(t *testing.T) {
+	_, err := NewClient("http://jira.example.com", "token", false)
+	if err == nil {
+		t.Error("NewClient with http:// non-loopback expected error, got nil")
 	}
 }
 
@@ -134,9 +183,119 @@ func TestNormalizeURL_WithPort(t *testing.T) {
 	}
 }
 
+// --- normalizeURL security regression tests ---
+
+func TestNormalizeURL_StripsUserinfo(t *testing.T) {
+	got, err := normalizeURL("https://admin:secret@jira.example.com")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != testBaseURL {
+		t.Errorf("normalizeURL with userinfo = %q, want %q", got, testBaseURL)
+	}
+}
+
+func TestNormalizeURL_StripsUserinfoWithPath(t *testing.T) {
+	got, err := normalizeURL("https://user:pass@jira.example.com/context")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "https://jira.example.com/context" {
+		t.Errorf("normalizeURL with userinfo+path = %q, want %q", got, "https://jira.example.com/context")
+	}
+}
+
+func TestNormalizeURL_AllowedHosts_Enforced(t *testing.T) {
+	t.Setenv("JIRA_ALLOWED_HOSTS", "jira.corp.com")
+	_, err := normalizeURL("https://evil.example.com")
+	if err == nil {
+		t.Error("expected error for host not in JIRA_ALLOWED_HOSTS, got nil")
+	}
+}
+
+func TestNormalizeURL_AllowedHosts_Passes(t *testing.T) {
+	t.Setenv("JIRA_ALLOWED_HOSTS", "jira.corp.com")
+	got, err := normalizeURL("https://jira.corp.com")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "https://jira.corp.com" {
+		t.Errorf("normalizeURL = %q, want %q", got, "https://jira.corp.com")
+	}
+}
+
+func TestNormalizeURL_AllowedHosts_CaseInsensitive(t *testing.T) {
+	t.Setenv("JIRA_ALLOWED_HOSTS", "Jira.Corp.Com")
+	_, err := normalizeURL("https://jira.corp.com")
+	if err != nil {
+		t.Errorf("expected case-insensitive match to pass, got error: %v", err)
+	}
+}
+
+func TestNormalizeURL_AllowedHosts_MultipleHosts(t *testing.T) {
+	t.Setenv("JIRA_ALLOWED_HOSTS", "jira.corp.com , jira2.corp.com")
+	if _, err := normalizeURL("https://jira.corp.com"); err != nil {
+		t.Errorf("first host should be allowed: %v", err)
+	}
+	if _, err := normalizeURL("https://jira2.corp.com"); err != nil {
+		t.Errorf("second host should be allowed: %v", err)
+	}
+	if _, err := normalizeURL("https://evil.com"); err == nil {
+		t.Error("unlisted host should be rejected")
+	}
+}
+
+func TestNormalizeURL_AllowedHosts_NotSet_NoRestriction(t *testing.T) {
+	t.Setenv("JIRA_ALLOWED_HOSTS", "")
+	_, err := normalizeURL("https://any.example.com")
+	if err != nil {
+		t.Errorf("unset JIRA_ALLOWED_HOSTS should not restrict: %v", err)
+	}
+}
+
+func TestNormalizeURL_SchemeCaseNormalized(t *testing.T) {
+	_, err := normalizeURL("HTTP://jira.example.com")
+	if err == nil {
+		t.Error("HTTP:// (uppercase) for non-loopback should be rejected after lowercasing scheme")
+	}
+}
+
+func TestNormalizeURL_HTTPSToHTTPRedirectBlocked(t *testing.T) {
+	// Start an HTTP server that redirects to itself (same host, different scheme would
+	// be caught by CheckRedirect). We simulate the redirect block by verifying that
+	// the client's CheckRedirect rejects HTTPS→HTTP downgrades.
+	httpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// This server just returns 200; the redirect is simulated below.
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer httpSrv.Close()
+
+	// Create a server that redirects HTTPS→HTTP (simulated with two test servers)
+	redirectSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, httpSrv.URL+"/redirect-target", http.StatusFound)
+	}))
+	defer redirectSrv.Close()
+
+	c, err := NewClient(redirectSrv.URL, "test-token", false)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	// Save the production CheckRedirect before replacing the HTTP client
+	originalCheckRedirect := c.httpClient.CheckRedirect
+	// Replace the HTTP client with one that trusts the test TLS cert
+	c.httpClient = redirectSrv.Client()
+	// Restore the production CheckRedirect
+	c.httpClient.CheckRedirect = originalCheckRedirect
+
+	err = c.doRequest(context.Background(), http.MethodGet, "/", nil, nil)
+	if err == nil {
+		t.Error("expected error on HTTPS→HTTP redirect, got nil")
+	}
+}
+
 func TestNewClient_NormalizesURL(t *testing.T) {
 	// Verify that NewClient applies normalizeURL to the base URL
-	c := NewClient("jira.example.com/", "token", false)
+	c := mustNewClient(t, "jira.example.com/", "token", false)
 	if c.baseURL != testBaseURL {
 		t.Errorf("NewClient baseURL = %q, want 'https://jira.example.com'", c.baseURL)
 	}
@@ -234,14 +393,24 @@ func TestParseRetryAfter_Seconds(t *testing.T) {
 }
 
 func TestParseRetryAfter_OutOfRange(t *testing.T) {
-	c := &Client{}
-	// Negative
+	c := &Client{} // MaxRetryAfterSecs == 0 → defaults to 60
+	// Negative values fall back to 1
 	if got := c.parseRetryAfter("-5"); got != 1 {
 		t.Errorf("parseRetryAfter('-5') = %d, want 1 (fallback)", got)
 	}
-	// Too large
-	if got := c.parseRetryAfter("99999"); got != 1 {
-		t.Errorf("parseRetryAfter('99999') = %d, want 1 (fallback)", got)
+	// Values exceeding MaxRetryAfterSecs (60) are capped
+	if got := c.parseRetryAfter("99999"); got != 60 {
+		t.Errorf("parseRetryAfter('99999') = %d, want 60 (cap)", got)
+	}
+}
+
+func TestParseRetryAfter_CustomCap(t *testing.T) {
+	c := &Client{MaxRetryAfterSecs: 120}
+	if got := c.parseRetryAfter("200"); got != 120 {
+		t.Errorf("parseRetryAfter('200') with cap 120 = %d, want 120", got)
+	}
+	if got := c.parseRetryAfter("100"); got != 100 {
+		t.Errorf("parseRetryAfter('100') with cap 120 = %d, want 100", got)
 	}
 }
 
@@ -300,7 +469,7 @@ func TestCreateIssue_Success(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(CreateIssueResponse{ //nolint:errcheck,gosec
+		encodeJSON(t, w, CreateIssueResponse{
 			ID:   "10001",
 			Key:  "PROJ-1",
 			Self: "https://jira.example.com/rest/api/2/issue/10001",
@@ -308,10 +477,10 @@ func TestCreateIssue_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "test-token", false)
+	c := mustNewClient(t, server.URL, "test-token", false)
 	c.MaxRetries = 0
 
-	resp, err := c.CreateIssue(&CreateIssueRequest{
+	resp, err := c.CreateIssue(context.Background(), &CreateIssueRequest{
 		Fields: map[string]any{
 			"summary":   "Test issue",
 			"issuetype": FormatIssueType("Story"),
@@ -328,14 +497,14 @@ func TestCreateIssue_Success(t *testing.T) {
 func TestCreateIssue_ClientError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"errors":{"summary":"required"}}`)) //nolint:errcheck,gosec
+		writeBytes(t, w, []byte(`{"errors":{"summary":"required"}}`))
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "token", false)
+	c := mustNewClient(t, server.URL, "token", false)
 	c.MaxRetries = 0
 
-	_, err := c.CreateIssue(&CreateIssueRequest{Fields: map[string]any{}})
+	_, err := c.CreateIssue(context.Background(), &CreateIssueRequest{Fields: map[string]any{}})
 	if err == nil {
 		t.Fatal("expected error for 400 response")
 	}
@@ -354,15 +523,15 @@ func TestCreateIssue_ServerError_RetriesAndFails(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&attempts, 1)
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("internal error")) //nolint:errcheck,gosec
+		writeBytes(t, w, []byte("internal error"))
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "token", false)
+	c := mustNewClient(t, server.URL, "token", false)
 	c.MaxRetries = 1
 	c.RetryDelay = time.Millisecond // speed up test
 
-	_, err := c.CreateIssue(&CreateIssueRequest{Fields: map[string]any{"summary": "test"}})
+	_, err := c.CreateIssue(context.Background(), &CreateIssueRequest{Fields: map[string]any{"summary": "test"}})
 	if err == nil {
 		t.Fatal("expected error after retries exhausted")
 	}
@@ -379,59 +548,24 @@ func TestCreateIssue_ServerError_RetriesAndSucceeds(t *testing.T) {
 		n := atomic.AddInt32(&attempts, 1)
 		if n < 2 {
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("temporary failure")) //nolint:errcheck,gosec
+			writeBytes(t, w, []byte("temporary failure"))
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(CreateIssueResponse{Key: "PROJ-1"}) //nolint:errcheck,gosec
+		encodeJSON(t, w, CreateIssueResponse{Key: "PROJ-1"})
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "token", false)
+	c := mustNewClient(t, server.URL, "token", false)
 	c.MaxRetries = 2
 	c.RetryDelay = time.Millisecond
 
-	resp, err := c.CreateIssue(&CreateIssueRequest{Fields: map[string]any{"summary": "test"}})
+	resp, err := c.CreateIssue(context.Background(), &CreateIssueRequest{Fields: map[string]any{"summary": "test"}})
 	if err != nil {
 		t.Fatalf("expected success on retry: %v", err)
 	}
 	if resp.Key != "PROJ-1" {
 		t.Errorf("Key = %q, want PROJ-1", resp.Key)
-	}
-}
-
-func TestSearchIssues_Success(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			t.Errorf("method = %s, want GET", r.Method)
-		}
-		jql := r.URL.Query().Get("jql")
-		if jql != `project = PROJ AND summary ~ "test"` {
-			t.Errorf("jql = %q", jql)
-		}
-
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(SearchResult{ //nolint:errcheck,gosec
-			Total: 1,
-			Issues: []SearchIssue{
-				{Key: "PROJ-1", Fields: map[string]any{"summary": "test"}},
-			},
-		})
-	}))
-	defer server.Close()
-
-	c := NewClient(server.URL, "token", false)
-	c.MaxRetries = 0
-
-	result, err := c.SearchIssues(`project = PROJ AND summary ~ "test"`, 10)
-	if err != nil {
-		t.Fatalf("SearchIssues: %v", err)
-	}
-	if result.Total != 1 {
-		t.Errorf("Total = %d, want 1", result.Total)
-	}
-	if result.Issues[0].Key != "PROJ-1" {
-		t.Errorf("Key = %q, want PROJ-1", result.Issues[0].Key)
 	}
 }
 
@@ -447,14 +581,22 @@ func TestUpdateIssue_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "token", false)
+	c := mustNewClient(t, server.URL, "token", false)
 	c.MaxRetries = 0
 
-	err := c.UpdateIssue("PROJ-1", &UpdateIssueRequest{
+	err := c.UpdateIssue(context.Background(), "PROJ-1", &UpdateIssueRequest{
 		Fields: map[string]any{"summary": "updated"},
 	})
 	if err != nil {
 		t.Fatalf("UpdateIssue: %v", err)
+	}
+}
+
+func TestUpdateIssue_InvalidKey(t *testing.T) {
+	c := mustNewClient(t, testBaseURL, "token", false)
+	err := c.UpdateIssue(context.Background(), "not-a-jira-key", &UpdateIssueRequest{Fields: map[string]any{}})
+	if err == nil {
+		t.Error("UpdateIssue with invalid key should return error")
 	}
 }
 
@@ -470,10 +612,10 @@ func TestCreateIssueLink_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "token", false)
+	c := mustNewClient(t, server.URL, "token", false)
 	c.MaxRetries = 0
 
-	err := c.CreateIssueLink(&IssueLinkRequest{
+	err := c.CreateIssueLink(context.Background(), &IssueLinkRequest{
 		Type:         IssueLinkType{Name: "Blocks"},
 		InwardIssue:  IssueRef{Key: "PROJ-2"},
 		OutwardIssue: IssueRef{Key: "PROJ-1"},
@@ -489,14 +631,14 @@ func TestCreateIssue_CloudUsesAPIv3(t *testing.T) {
 			t.Errorf("path = %q, want /rest/api/3/issue (Cloud)", r.URL.Path)
 		}
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(CreateIssueResponse{Key: "CLOUD-1"}) //nolint:errcheck,gosec
+		encodeJSON(t, w, CreateIssueResponse{Key: "CLOUD-1"})
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "token", true) // isCloud=true
+	c := mustNewClient(t, server.URL, "token", true) // isCloud=true
 	c.MaxRetries = 0
 
-	resp, err := c.CreateIssue(&CreateIssueRequest{Fields: map[string]any{"summary": "cloud test"}})
+	resp, err := c.CreateIssue(context.Background(), &CreateIssueRequest{Fields: map[string]any{"summary": "cloud test"}})
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -515,15 +657,15 @@ func TestDoRequest_RateLimit429(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(CreateIssueResponse{Key: "PROJ-1"}) //nolint:errcheck,gosec
+		encodeJSON(t, w, CreateIssueResponse{Key: "PROJ-1"})
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "token", false)
+	c := mustNewClient(t, server.URL, "token", false)
 	c.MaxRetries = 2
 	c.RetryDelay = time.Millisecond
 
-	resp, err := c.CreateIssue(&CreateIssueRequest{Fields: map[string]any{"summary": "test"}})
+	resp, err := c.CreateIssue(context.Background(), &CreateIssueRequest{Fields: map[string]any{"summary": "test"}})
 	if err != nil {
 		t.Fatalf("expected success after 429 retry: %v", err)
 	}
@@ -539,7 +681,7 @@ func TestDoRequest_RateLimit429(t *testing.T) {
 
 func BenchmarkParseRetryAfter_Seconds(b *testing.B) {
 	c := &Client{}
-	for range b.N {
+	for b.Loop() {
 		c.parseRetryAfter("30")
 	}
 }
@@ -547,12 +689,20 @@ func BenchmarkParseRetryAfter_Seconds(b *testing.B) {
 func BenchmarkParseRetryAfter_HTTPDate(b *testing.B) {
 	c := &Client{}
 	future := time.Now().Add(30 * time.Second).UTC().Format(time.RFC1123)
-	for range b.N {
+	for b.Loop() {
 		c.parseRetryAfter(future)
 	}
 }
 
 // --- FetchEpics ---
+
+func TestFetchEpics_InvalidProjectKey(t *testing.T) {
+	c := mustNewClient(t, testBaseURL, "token", false)
+	_, err := c.FetchEpics(context.Background(), "invalid-key", "")
+	if err == nil {
+		t.Error("FetchEpics with invalid project key should return error")
+	}
+}
 
 func TestFetchEpics_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -572,7 +722,7 @@ func TestFetchEpics_Success(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(SearchResult{ //nolint:errcheck,gosec
+		encodeJSON(t, w, SearchResult{
 			Total: 2,
 			Issues: []SearchIssue{
 				{
@@ -594,10 +744,10 @@ func TestFetchEpics_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "token", false)
+	c := mustNewClient(t, server.URL, "token", false)
 	c.MaxRetries = 0
 
-	epics, err := c.FetchEpics("PROJ", "")
+	epics, err := c.FetchEpics(context.Background(), "PROJ", "")
 	if err != nil {
 		t.Fatalf("FetchEpics: %v", err)
 	}
@@ -635,7 +785,7 @@ func TestFetchEpics_WithStatusFilter(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(SearchResult{ //nolint:errcheck,gosec
+		encodeJSON(t, w, SearchResult{
 			Total: 1,
 			Issues: []SearchIssue{
 				{
@@ -650,10 +800,10 @@ func TestFetchEpics_WithStatusFilter(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "token", false)
+	c := mustNewClient(t, server.URL, "token", false)
 	c.MaxRetries = 0
 
-	epics, err := c.FetchEpics("PROJ", "In Progress")
+	epics, err := c.FetchEpics(context.Background(), "PROJ", "In Progress")
 	if err != nil {
 		t.Fatalf("FetchEpics: %v", err)
 	}
@@ -677,14 +827,14 @@ func TestFetchEpics_StatusFilterNoResults(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(SearchResult{Total: 0, Issues: nil}) //nolint:errcheck,gosec
+		encodeJSON(t, w, SearchResult{Total: 0, Issues: nil})
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "token", false)
+	c := mustNewClient(t, server.URL, "token", false)
 	c.MaxRetries = 0
 
-	epics, err := c.FetchEpics("PROJ", "Done")
+	epics, err := c.FetchEpics(context.Background(), "PROJ", "Done")
 	if err != nil {
 		t.Fatalf("FetchEpics: %v", err)
 	}
@@ -702,7 +852,7 @@ func TestFetchEpics_NegatedStatusFilter(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(SearchResult{ //nolint:errcheck,gosec
+		encodeJSON(t, w, SearchResult{
 			Total: 2,
 			Issues: []SearchIssue{
 				{
@@ -724,10 +874,10 @@ func TestFetchEpics_NegatedStatusFilter(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "token", false)
+	c := mustNewClient(t, server.URL, "token", false)
 	c.MaxRetries = 0
 
-	epics, err := c.FetchEpics("PROJ", "NOT:Done")
+	epics, err := c.FetchEpics(context.Background(), "PROJ", "NOT:Done")
 	if err != nil {
 		t.Fatalf("FetchEpics: %v", err)
 	}
@@ -745,14 +895,14 @@ func TestFetchEpics_NegatedStatusFilter(t *testing.T) {
 func TestFetchEpics_Empty(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(SearchResult{Total: 0, Issues: nil}) //nolint:errcheck,gosec
+		encodeJSON(t, w, SearchResult{Total: 0, Issues: nil})
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "token", false)
+	c := mustNewClient(t, server.URL, "token", false)
 	c.MaxRetries = 0
 
-	epics, err := c.FetchEpics("EMPTY", "")
+	epics, err := c.FetchEpics(context.Background(), "EMPTY", "")
 	if err != nil {
 		t.Fatalf("FetchEpics: %v", err)
 	}
@@ -782,7 +932,7 @@ func TestFetchEpics_Pagination(t *testing.T) {
 					},
 				}
 			}
-			json.NewEncoder(w).Encode(SearchResult{Total: 75, Issues: issues}) //nolint:errcheck,gosec
+			encodeJSON(t, w, SearchResult{Total: 75, Issues: issues})
 
 		case page == 2 && startAt == "50":
 			// Second page: 25 results
@@ -796,19 +946,19 @@ func TestFetchEpics_Pagination(t *testing.T) {
 					},
 				}
 			}
-			json.NewEncoder(w).Encode(SearchResult{Total: 75, Issues: issues}) //nolint:errcheck,gosec
+			encodeJSON(t, w, SearchResult{Total: 75, Issues: issues})
 
 		default:
 			t.Errorf("unexpected request: page=%d, startAt=%s", page, startAt)
-			json.NewEncoder(w).Encode(SearchResult{Total: 0, Issues: nil}) //nolint:errcheck,gosec
+			encodeJSON(t, w, SearchResult{Total: 0, Issues: nil})
 		}
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "token", false)
+	c := mustNewClient(t, server.URL, "token", false)
 	c.MaxRetries = 0
 
-	epics, err := c.FetchEpics("PROJ", "")
+	epics, err := c.FetchEpics(context.Background(), "PROJ", "")
 	if err != nil {
 		t.Fatalf("FetchEpics: %v", err)
 	}
@@ -833,14 +983,14 @@ func TestFetchEpics_Pagination(t *testing.T) {
 func TestFetchEpics_APIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"errorMessages":["invalid JQL"]}`)) //nolint:errcheck,gosec
+		writeBytes(t, w, []byte(`{"errorMessages":["invalid JQL"]}`))
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "token", false)
+	c := mustNewClient(t, server.URL, "token", false)
 	c.MaxRetries = 0
 
-	_, err := c.FetchEpics("BAD", "")
+	_, err := c.FetchEpics(context.Background(), "BAD", "")
 	if err == nil {
 		t.Fatal("expected error for API failure")
 	}
@@ -849,7 +999,7 @@ func TestFetchEpics_APIError(t *testing.T) {
 func TestFetchEpics_MissingStatusField(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(SearchResult{ //nolint:errcheck,gosec
+		encodeJSON(t, w, SearchResult{
 			Total: 1,
 			Issues: []SearchIssue{
 				{
@@ -864,10 +1014,10 @@ func TestFetchEpics_MissingStatusField(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "token", false)
+	c := mustNewClient(t, server.URL, "token", false)
 	c.MaxRetries = 0
 
-	epics, err := c.FetchEpics("PROJ", "")
+	epics, err := c.FetchEpics(context.Background(), "PROJ", "")
 	if err != nil {
 		t.Fatalf("FetchEpics: %v", err)
 	}
@@ -892,14 +1042,14 @@ func TestFetchEpics_CloudUsesV3(t *testing.T) {
 			}
 		}
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(SearchResult{Total: 0, Issues: nil}) //nolint:errcheck,gosec
+		encodeJSON(t, w, SearchResult{Total: 0, Issues: nil})
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "token", true) // isCloud=true
+	c := mustNewClient(t, server.URL, "token", true) // isCloud=true
 	c.MaxRetries = 0
 
-	_, err := c.FetchEpics("PROJ", "")
+	_, err := c.FetchEpics(context.Background(), "PROJ", "")
 	if err != nil {
 		t.Fatalf("FetchEpics: %v", err)
 	}
@@ -914,15 +1064,15 @@ func TestDoRequest_NoRetryOn4xx(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				atomic.AddInt32(&attempts, 1)
 				w.WriteHeader(code)
-				w.Write([]byte(`{"error":"client error"}`)) //nolint:errcheck,gosec
+				writeBytes(t, w, []byte(`{"error":"client error"}`))
 			}))
 			defer server.Close()
 
-			c := NewClient(server.URL, "token", false)
+			c := mustNewClient(t, server.URL, "token", false)
 			c.MaxRetries = 3
 			c.RetryDelay = time.Millisecond
 
-			_, err := c.CreateIssue(&CreateIssueRequest{Fields: map[string]any{"summary": "test"}})
+			_, err := c.CreateIssue(context.Background(), &CreateIssueRequest{Fields: map[string]any{"summary": "test"}})
 			if err == nil {
 				t.Fatal("expected error")
 			}
@@ -947,7 +1097,7 @@ func TestFetchFields_Success(t *testing.T) {
 		}
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode([]Field{ //nolint:errcheck,gosec
+		encodeJSON(t, w, []Field{
 			{ID: "summary", Name: "Summary", Custom: false},
 			{ID: "customfield_10009", Name: "Epic Link", Custom: true, Schema: &FieldSchema{
 				Type: "any", Custom: "com.pyxis.greenhopper.jira:gh-epic-link", CustomID: 10009,
@@ -960,10 +1110,10 @@ func TestFetchFields_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "token", false)
+	c := mustNewClient(t, server.URL, "token", false)
 	c.MaxRetries = 0
 
-	fields, err := c.FetchFields()
+	fields, err := c.FetchFields(context.Background())
 	if err != nil {
 		t.Fatalf("FetchFields: %v", err)
 	}
@@ -988,14 +1138,14 @@ func TestFetchFields_Success(t *testing.T) {
 func TestFetchFields_Empty(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode([]Field{}) //nolint:errcheck,gosec
+		encodeJSON(t, w, []Field{})
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "token", false)
+	c := mustNewClient(t, server.URL, "token", false)
 	c.MaxRetries = 0
 
-	fields, err := c.FetchFields()
+	fields, err := c.FetchFields(context.Background())
 	if err != nil {
 		t.Fatalf("FetchFields: %v", err)
 	}
@@ -1007,14 +1157,14 @@ func TestFetchFields_Empty(t *testing.T) {
 func TestFetchFields_APIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"errorMessages":["unauthorized"]}`)) //nolint:errcheck,gosec
+		writeBytes(t, w, []byte(`{"errorMessages":["unauthorized"]}`))
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "token", false)
+	c := mustNewClient(t, server.URL, "token", false)
 	c.MaxRetries = 0
 
-	_, err := c.FetchFields()
+	_, err := c.FetchFields(context.Background())
 	if err == nil {
 		t.Fatal("expected error for 401 response")
 	}
@@ -1026,14 +1176,14 @@ func TestFetchFields_CloudUsesV3(t *testing.T) {
 			t.Errorf("path = %q, want /rest/api/3/field (Cloud v3)", r.URL.Path)
 		}
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode([]Field{}) //nolint:errcheck,gosec
+		encodeJSON(t, w, []Field{})
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "token", true) // isCloud=true
+	c := mustNewClient(t, server.URL, "token", true) // isCloud=true
 	c.MaxRetries = 0
 
-	_, err := c.FetchFields()
+	_, err := c.FetchFields(context.Background())
 	if err != nil {
 		t.Fatalf("FetchFields: %v", err)
 	}
@@ -1043,14 +1193,14 @@ func TestFetchFields_NoSchema(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		// Some fields (like "issuekey") have no schema at all
-		w.Write([]byte(`[{"id":"issuekey","name":"Key","custom":false}]`)) //nolint:errcheck,gosec
+		writeBytes(t, w, []byte(`[{"id":"issuekey","name":"Key","custom":false}]`))
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "token", false)
+	c := mustNewClient(t, server.URL, "token", false)
 	c.MaxRetries = 0
 
-	fields, err := c.FetchFields()
+	fields, err := c.FetchFields(context.Background())
 	if err != nil {
 		t.Fatalf("FetchFields: %v", err)
 	}
@@ -1070,7 +1220,7 @@ func TestFetchIssueLinkTypes_Success(t *testing.T) {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck,gosec
+		encodeJSON(t, w, map[string]any{
 			"issueLinkTypes": []map[string]any{
 				{"id": "10000", "name": "Blocks", "inward": "is blocked by", "outward": "blocks"},
 				{"id": "10001", "name": "Duplicate", "inward": "is duplicated by", "outward": "duplicates"},
@@ -1080,8 +1230,8 @@ func TestFetchIssueLinkTypes_Success(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c := NewClient(ts.URL, "tok", false)
-	types, err := c.FetchIssueLinkTypes()
+	c := mustNewClient(t, ts.URL, "tok", false)
+	types, err := c.FetchIssueLinkTypes(context.Background())
 	if err != nil {
 		t.Fatalf("FetchIssueLinkTypes: %v", err)
 	}
@@ -1102,12 +1252,12 @@ func TestFetchIssueLinkTypes_Success(t *testing.T) {
 func TestFetchIssueLinkTypes_Empty(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"issueLinkTypes": []any{}}) //nolint:errcheck,gosec
+		encodeJSON(t, w, map[string]any{"issueLinkTypes": []any{}})
 	}))
 	defer ts.Close()
 
-	c := NewClient(ts.URL, "tok", false)
-	types, err := c.FetchIssueLinkTypes()
+	c := mustNewClient(t, ts.URL, "tok", false)
+	types, err := c.FetchIssueLinkTypes(context.Background())
 	if err != nil {
 		t.Fatalf("FetchIssueLinkTypes: %v", err)
 	}
@@ -1119,12 +1269,12 @@ func TestFetchIssueLinkTypes_Empty(t *testing.T) {
 func TestFetchIssueLinkTypes_APIError(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
-		w.Write([]byte(`{"errorMessages":["Forbidden"]}`)) //nolint:errcheck,gosec
+		writeBytes(t, w, []byte(`{"errorMessages":["Forbidden"]}`))
 	}))
 	defer ts.Close()
 
-	c := NewClient(ts.URL, "tok", false)
-	_, err := c.FetchIssueLinkTypes()
+	c := mustNewClient(t, ts.URL, "tok", false)
+	_, err := c.FetchIssueLinkTypes(context.Background())
 	if err == nil {
 		t.Fatal("expected error for 403")
 	}
@@ -1136,12 +1286,12 @@ func TestFetchIssueLinkTypes_CloudUsesV3(t *testing.T) {
 			t.Errorf("expected v3 path, got %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"issueLinkTypes": []any{}}) //nolint:errcheck,gosec
+		encodeJSON(t, w, map[string]any{"issueLinkTypes": []any{}})
 	}))
 	defer ts.Close()
 
-	c := NewClient(ts.URL, "tok", true) // isCloud = true
-	_, err := c.FetchIssueLinkTypes()
+	c := mustNewClient(t, ts.URL, "tok", true) // isCloud = true
+	_, err := c.FetchIssueLinkTypes(context.Background())
 	if err != nil {
 		t.Fatalf("FetchIssueLinkTypes: %v", err)
 	}

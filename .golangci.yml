@@ -50,6 +50,13 @@ linters:
       excludes:
         - G112
         - G306
+        # G703/G704 are taint-analysis variants of G304/G107. The underlying
+        # concerns are mitigated: executable paths are resolved via filepath.Abs,
+        # and HTTP URLs are validated (scheme check) and re-serialised via
+        # url.URL.String() before use. Gosec's taint engine cannot reason about
+        # these sanitisers and produces false positives in both cases.
+        - G703
+        - G704
     nolintlint:
       require-specific: true
     usestdlibvars:

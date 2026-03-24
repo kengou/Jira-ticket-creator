@@ -6,6 +6,8 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"sigs.k8s.io/yaml"
 )
@@ -110,7 +112,12 @@ func LoadConfigFromBytes(data []byte) (*Config, error) {
 
 // LoadConfig loads and parses a YAML configuration file.
 func LoadConfig(path string) (*Config, error) {
-	data, err := os.ReadFile(path) //nolint:gosec
+	cleanPath := filepath.Clean(path)
+	// Reject paths that escape the working directory via traversal sequences.
+	if strings.Contains(cleanPath, "..") {
+		return nil, fmt.Errorf("config file path %q is not allowed: path traversal detected", path)
+	}
+	data, err := os.ReadFile(cleanPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file %q: %w", path, err)
 	}

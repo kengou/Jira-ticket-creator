@@ -1,6 +1,7 @@
 package apply
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -16,15 +17,15 @@ type mockClient struct {
 	fetchLinkTypesFn  func() ([]jira.IssueLinkTypeInfo, error)
 }
 
-func (m *mockClient) CreateIssue(r *jira.CreateIssueRequest) (*jira.CreateIssueResponse, error) {
+func (m *mockClient) CreateIssue(_ context.Context, r *jira.CreateIssueRequest) (*jira.CreateIssueResponse, error) {
 	return m.createIssueFn(r)
 }
 
-func (m *mockClient) CreateIssueLink(r *jira.IssueLinkRequest) error {
+func (m *mockClient) CreateIssueLink(_ context.Context, r *jira.IssueLinkRequest) error {
 	return m.createIssueLinkFn(r)
 }
 
-func (m *mockClient) FetchIssueLinkTypes() ([]jira.IssueLinkTypeInfo, error) {
+func (m *mockClient) FetchIssueLinkTypes(_ context.Context) ([]jira.IssueLinkTypeInfo, error) {
 	return m.fetchLinkTypesFn()
 }
 
@@ -294,7 +295,7 @@ func TestResolveLinkType_DirectionFromOutward(t *testing.T) {
 	}
 
 	// With matchedViaOutward, source goes to outward, target goes to inward
-	source, target := "POM-1", "POM-2"
+	source, target := "DEMO-5374", "DEMO-2169"
 	var inward, outward string
 	switch resolved.matchedVia {
 	case matchedViaInward:
@@ -304,8 +305,8 @@ func TestResolveLinkType_DirectionFromOutward(t *testing.T) {
 		inward = target
 		outward = source
 	}
-	if outward != "POM-1" || inward != "POM-2" {
-		t.Errorf("direction: outward=%q inward=%q, want outward=POM-1 inward=POM-2", outward, inward)
+	if outward != "DEMO-5374" || inward != "DEMO-2169" {
+		t.Errorf("direction: outward=%q inward=%q, want outward=DEMO-5374 inward=DEMO-2169", outward, inward)
 	}
 }
 
@@ -319,7 +320,7 @@ func TestResolveLinkType_DirectionFromInward(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	source, target := "POM-1", "POM-2"
+	source, target := "DEMO-5374", "DEMO-2169"
 	var inward, outward string
 	switch resolved.matchedVia {
 	case matchedViaInward:
@@ -329,8 +330,8 @@ func TestResolveLinkType_DirectionFromInward(t *testing.T) {
 		inward = target
 		outward = source
 	}
-	if inward != "POM-1" || outward != "POM-2" {
-		t.Errorf("direction: inward=%q outward=%q, want inward=POM-1 outward=POM-2", inward, outward)
+	if inward != "DEMO-5374" || outward != "DEMO-2169" {
+		t.Errorf("direction: inward=%q outward=%q, want inward=DEMO-5374 outward=DEMO-2169", inward, outward)
 	}
 }
 
@@ -454,6 +455,68 @@ func TestRenderDescription_TemplateButNoVars(t *testing.T) {
 	}
 	if got != "" {
 		t.Errorf("got %q, want empty (no template vars)", got)
+	}
+}
+
+// --- renderDescription security regression tests ---
+
+func TestRenderDescription_NoDoubleExpansion(t *testing.T) {
+	// Security regression: a template variable value containing "{other_key}"
+	// must not be re-expanded. Two-pass sentinel approach should prevent this.
+	a := &Applier{
+		config: &config.Config{
+			Defaults: config.Defaults{
+				DescriptionTemplate: "Goal: {goal}\nSummary: {summary}",
+			},
+		},
+	}
+	issue := &config.Issue{
+		Summary: "{goal}", // value contains another placeholder
+		TemplateVars: map[string]string{
+			"goal": "exploit",
+		},
+	}
+	got, err := a.renderDescription(issue)
+	if err != nil {
+		t.Fatalf("renderDescription: %v", err)
+	}
+	// {summary} is replaced with the literal string "{goal}" — it must NOT be
+	// further expanded to "exploit". The output should contain "{goal}" literally.
+	if got == "Goal: exploit\nSummary: exploit" {
+		t.Error("double expansion occurred: value of {summary} was re-expanded as {goal}")
+	}
+	// The correct output has the literal {goal} from the summary value
+	if got != "Goal: exploit\nSummary: {goal}" {
+		t.Errorf("unexpected output: %q", got)
+	}
+}
+
+func TestRenderDescription_DeterministicOrder(t *testing.T) {
+	// Verify that replacement order does not depend on map iteration order
+	a := &Applier{
+		config: &config.Config{
+			Defaults: config.Defaults{
+				DescriptionTemplate: "{a}-{b}-{c}",
+			},
+		},
+	}
+	issue := &config.Issue{
+		Summary: "ignored",
+		TemplateVars: map[string]string{
+			"a": "alpha",
+			"b": "beta",
+			"c": "gamma",
+		},
+	}
+	want := "alpha-beta-gamma"
+	for range 10 {
+		got, err := a.renderDescription(issue)
+		if err != nil {
+			t.Fatalf("renderDescription: %v", err)
+		}
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
 	}
 }
 
@@ -934,7 +997,7 @@ func TestCreateIssueLinks_NoLinks(t *testing.T) {
 		},
 		createdIssues: map[string]string{"S1": "PROJ-1"},
 	}
-	if err := a.createIssueLinks(); err != nil {
+	if err := a.createIssueLinks(context.Background()); err != nil {
 		t.Fatalf("expected nil, got %v", err)
 	}
 }
@@ -963,7 +1026,7 @@ func TestCreateIssueLinks_DryRun(t *testing.T) {
 		dryRun:        true,
 		createdIssues: map[string]string{"S1": "PROJ-1", "S2": "PROJ-2"},
 	}
-	if err := a.createIssueLinks(); err != nil {
+	if err := a.createIssueLinks(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if fetchCalled {
@@ -997,7 +1060,7 @@ func TestCreateIssueLinks_Success(t *testing.T) {
 		client:        mc,
 		createdIssues: map[string]string{"S1": "PROJ-1", "S2": "PROJ-2"},
 	}
-	if err := a.createIssueLinks(); err != nil {
+	if err := a.createIssueLinks(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if capturedReq == nil {
@@ -1038,7 +1101,7 @@ func TestCreateIssueLinks_TargetIsJiraKey(t *testing.T) {
 		createdIssues: map[string]string{"S1": "PROJ-1"},
 		// EXT-999 is not in createdIssues but is a valid Jira key
 	}
-	if err := a.createIssueLinks(); err != nil {
+	if err := a.createIssueLinks(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if capturedReq == nil {
@@ -1073,7 +1136,7 @@ func TestCreateIssueLinks_TargetNotCreated(t *testing.T) {
 		// MISSING is not in createdIssues and not a Jira key
 	}
 	// Should warn but return nil (not an error)
-	if err := a.createIssueLinks(); err != nil {
+	if err := a.createIssueLinks(context.Background()); err != nil {
 		t.Fatalf("expected nil error for uncreated non-jira target, got %v", err)
 	}
 }
@@ -1099,7 +1162,7 @@ func TestCreateIssueLinks_ResolveFails(t *testing.T) {
 		client:        mc,
 		createdIssues: map[string]string{"S1": "PROJ-1", "S2": "PROJ-2"},
 	}
-	err := a.createIssueLinks()
+	err := a.createIssueLinks(context.Background())
 	if err == nil {
 		t.Fatal("expected error for unknown link type, got nil")
 	}
@@ -1130,7 +1193,7 @@ func TestCreateIssueLinks_APIFails(t *testing.T) {
 		client:        mc,
 		createdIssues: map[string]string{"S1": "PROJ-1", "S2": "PROJ-2"},
 	}
-	err := a.createIssueLinks()
+	err := a.createIssueLinks(context.Background())
 	if err == nil {
 		t.Fatal("expected error from CreateIssueLink, got nil")
 	}
@@ -1166,7 +1229,7 @@ func TestCreateIssueLinks_MultipleErrors(t *testing.T) {
 		client:        mc,
 		createdIssues: map[string]string{"S1": "PROJ-1", "S2": "PROJ-2", "S3": "PROJ-3"},
 	}
-	err := a.createIssueLinks()
+	err := a.createIssueLinks(context.Background())
 	if err == nil {
 		t.Fatal("expected joined error, got nil")
 	}

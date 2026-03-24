@@ -9,7 +9,7 @@ VERSION   ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo de
 COMMIT    ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
-.PHONY: all build test vet lint validate clean install fmt tidy help
+.PHONY: all build test vet lint validate clean install fmt tidy verify-schema-sync help
 
 ## all: build the binary (default target)
 all: build
@@ -46,6 +46,11 @@ validate: vet lint test
 ## fmt: format all Go source files
 fmt:
 	$(GO) fmt ./...
+
+## verify-schema-sync: check that the embedded schema copy matches the canonical schema
+verify-schema-sync:
+	@diff schema/stories.schema.json internal/validation/stories.schema.json || \
+		(echo "ERROR: schema files are out of sync; run: cp schema/stories.schema.json internal/validation/" && exit 1)
 
 ## tidy: tidy and verify module dependencies
 tidy:

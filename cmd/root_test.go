@@ -7,10 +7,20 @@ import (
 // --- maskToken ---
 
 func TestMaskToken(t *testing.T) {
-	cases := []string{"", "abc", "abcd", "abcde", "abcdefgh12345678"}
-	for _, token := range cases {
-		if got := maskToken(token); got != "****" {
-			t.Errorf("maskToken(%q) = %q, want %q", token, got, "****")
+	cases := []struct {
+		token string
+		want  string
+	}{
+		{"", "****"},
+		{"abc", "****"},
+		{"abcd", "****"},
+		{"abcde", "****"},                // 5 chars < 12, fully masked
+		{"abcdefgh1234", "****1234"},     // exactly 12, show last 4
+		{"abcdefgh12345678", "****5678"}, // 16 chars, show last 4
+	}
+	for _, tc := range cases {
+		if got := maskToken(tc.token); got != tc.want {
+			t.Errorf("maskToken(%q) = %q, want %q", tc.token, got, tc.want)
 		}
 	}
 }
@@ -44,6 +54,8 @@ func TestValidateFlags_AuthRequired_MissingURL(t *testing.T) {
 	origCfg := configFile
 	origURL := jiraURL
 	origToken := jiraToken
+	t.Setenv("JIRA_URL", "")
+	t.Setenv("JIRA_TOKEN", "")
 	defer func() {
 		configFile = origCfg
 		jiraURL = origURL
@@ -64,6 +76,8 @@ func TestValidateFlags_AuthRequired_MissingToken(t *testing.T) {
 	origCfg := configFile
 	origURL := jiraURL
 	origToken := jiraToken
+	t.Setenv("JIRA_URL", "")
+	t.Setenv("JIRA_TOKEN", "")
 	defer func() {
 		configFile = origCfg
 		jiraURL = origURL
@@ -84,6 +98,8 @@ func TestValidateFlags_AuthRequired_AllPresent(t *testing.T) {
 	origCfg := configFile
 	origURL := jiraURL
 	origToken := jiraToken
+	t.Setenv("JIRA_URL", "")
+	t.Setenv("JIRA_TOKEN", "")
 	defer func() {
 		configFile = origCfg
 		jiraURL = origURL

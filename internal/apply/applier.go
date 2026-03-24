@@ -4,9 +4,11 @@
 package apply
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/kengou/Jira-ticket-creator/internal/config"
@@ -16,9 +18,9 @@ import (
 
 // JiraClient is the subset of the Jira API used by Applier.
 type JiraClient interface {
-	CreateIssue(req *jira.CreateIssueRequest) (*jira.CreateIssueResponse, error)
-	CreateIssueLink(req *jira.IssueLinkRequest) error
-	FetchIssueLinkTypes() ([]jira.IssueLinkTypeInfo, error)
+	CreateIssue(ctx context.Context, req *jira.CreateIssueRequest) (*jira.CreateIssueResponse, error)
+	CreateIssueLink(ctx context.Context, req *jira.IssueLinkRequest) error
+	FetchIssueLinkTypes(ctx context.Context) ([]jira.IssueLinkTypeInfo, error)
 }
 
 // Applier creates issues in Jira according to a configuration.
@@ -67,7 +69,7 @@ func NewApplier(cfg *config.Config, client JiraClient, verbose, dryRun bool, con
 }
 
 // Apply creates all issues in dependency order.
-func (a *Applier) Apply() error {
+func (a *Applier) Apply(ctx context.Context) error {
 	// Always load state for duplicate detection (unless dry-run).
 	// The state file is placed in the current working directory so that
 	// re-running from the project root always uses the same state file.
@@ -94,7 +96,7 @@ func (a *Applier) Apply() error {
 	// Create issues
 	var failedCount, skippedCount int
 	for i, issue := range ordered {
-		skipped, err := a.createIssue(&issue, i+1, len(ordered))
+		skipped, err := a.createIssue(ctx, &issue, i+1, len(ordered))
 		if err != nil {
 			if a.continueOnError {
 				fmt.Printf("❌ Error creating %s: %v (continuing...)\n", issue.ID, err)
@@ -121,7 +123,7 @@ func (a *Applier) Apply() error {
 	}
 
 	// Create issue links
-	if err := a.createIssueLinks(); err != nil {
+	if err := a.createIssueLinks(ctx); err != nil {
 		return fmt.Errorf("create issue links: %w", err)
 	}
 
@@ -147,7 +149,7 @@ func (a *Applier) Apply() error {
 
 // createIssue creates a single issue. Returns (skipped, error).
 // skipped is true when the issue already exists in state and was not re-created.
-func (a *Applier) createIssue(issue *config.Issue, index, total int) (bool, error) {
+func (a *Applier) createIssue(ctx context.Context, issue *config.Issue, index, total int) (bool, error) {
 	fmt.Printf("[%d/%d] %s: %s (%s)\n",
 		index, total, issue.ID, truncate(issue.Summary, 50), issue.IssueType)
 
@@ -194,7 +196,7 @@ func (a *Applier) createIssue(issue *config.Issue, index, total int) (bool, erro
 	}
 
 	// Create in Jira
-	resp, err := a.client.CreateIssue(&jira.CreateIssueRequest{Fields: fields})
+	resp, err := a.client.CreateIssue(ctx, &jira.CreateIssueRequest{Fields: fields})
 	if err != nil {
 		return false, err
 	}
@@ -333,18 +335,37 @@ func (a *Applier) renderDescription(issue *config.Issue) (string, error) {
 		vars[k] = v
 	}
 
-	// Simple placeholder replacement: {var} -> value
+	// Two-pass placeholder replacement to prevent overlap injection.
+	// Pass 1: Replace all {key} placeholders with unique sentinel tokens.
+	// Pass 2: Replace sentinels with final values.
+	// This ensures that a value containing "{other_key}" is not re-expanded.
 	result := a.config.Defaults.DescriptionTemplate
-	for key, value := range vars {
+	type replacement struct {
+		sentinel string
+		value    string
+	}
+	keys := make([]string, 0, len(vars))
+	for k := range vars {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	replacements := make([]replacement, 0, len(keys))
+	for i, key := range keys {
+		value := vars[key]
 		placeholder := "{" + key + "}"
-		result = strings.ReplaceAll(result, placeholder, value)
+		sentinel := fmt.Sprintf("\x00TMPL_%d\x00", i)
+		result = strings.ReplaceAll(result, placeholder, sentinel)
+		replacements = append(replacements, replacement{sentinel: sentinel, value: value})
+	}
+	for _, r := range replacements {
+		result = strings.ReplaceAll(result, r.sentinel, r.value)
 	}
 
 	return result, nil
 }
 
 // createIssueLinks creates all issue links defined in the configuration.
-func (a *Applier) createIssueLinks() error {
+func (a *Applier) createIssueLinks(ctx context.Context) error {
 	// Collect all issues that have links
 	var hasLinks bool
 	for _, issue := range a.config.Issues {
@@ -361,7 +382,7 @@ func (a *Applier) createIssueLinks() error {
 	var linkTypes []jira.IssueLinkTypeInfo
 	if !a.dryRun {
 		var err error
-		linkTypes, err = a.client.FetchIssueLinkTypes()
+		linkTypes, err = a.client.FetchIssueLinkTypes(ctx)
 		if err != nil {
 			return fmt.Errorf("fetch issue link types: %w", err)
 		}
@@ -383,7 +404,7 @@ func (a *Applier) createIssueLinks() error {
 		for _, link := range issue.Links {
 			targetKey, ok := a.createdIssues[link.Target]
 			if !ok {
-				// If the target looks like an existing Jira key (e.g. POM-1052),
+				// If the target looks like an existing Jira key (e.g. DEMO-2679),
 				// use it directly — this allows linking to issues that already exist in Jira.
 				if jira.IsJiraKey(link.Target) {
 					targetKey = link.Target
@@ -430,7 +451,7 @@ func (a *Applier) createIssueLinks() error {
 				req.Comment = &jira.LinkComment{Body: link.Comment}
 			}
 
-			if err := a.client.CreateIssueLink(req); err != nil {
+			if err := a.client.CreateIssueLink(ctx, req); err != nil {
 				fmt.Printf("⚠️  Failed to link %s -> %s: %v\n", sourceKey, targetKey, err)
 				errs = append(errs, fmt.Errorf("link %s -> %s: %w", sourceKey, targetKey, err))
 				continue
@@ -563,8 +584,7 @@ func (a *Applier) getEpicNameFieldID() string {
 	if a.config.Defaults.EpicNameField != "" {
 		return a.config.Defaults.EpicNameField
 	}
-	// Data Center default
-	return "customfield_10011"
+	return jira.DefaultEpicNameField
 }
 
 // getEpicLinkFieldID returns the field ID for epic link (configurable).
@@ -572,8 +592,7 @@ func (a *Applier) getEpicLinkFieldID() string {
 	if a.config.Defaults.EpicLinkField != "" {
 		return a.config.Defaults.EpicLinkField
 	}
-	// Data Center default
-	return "customfield_10009"
+	return jira.DefaultEpicLinkField
 }
 
 // BuildDependencyGraph builds a dependency graph and returns issues in creation order.

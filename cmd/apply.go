@@ -2,15 +2,22 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/kengou/Jira-ticket-creator/internal/apply"
 	"github.com/kengou/Jira-ticket-creator/internal/config"
 	"github.com/kengou/Jira-ticket-creator/internal/jira"
+	"github.com/kengou/Jira-ticket-creator/internal/validation"
 )
+
+var applyYes bool
 
 var applyCmd = &cobra.Command{
 	Use:   "apply",
@@ -31,19 +38,49 @@ func init() {
 
 	applyCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Simulate creation without making API calls")
 	applyCmd.Flags().BoolVar(&continueOnError, "continue-on-error", false, "Continue creating issues even if one fails")
+	applyCmd.Flags().BoolVar(&applyYes, "yes", false, "Skip review confirmation prompt (not recommended)")
 }
 
 func runApply() error {
-	fmt.Printf("🚀 Applying: %s\n", configFile)
+	fmt.Fprintf(os.Stderr, "%s Applying: %s\n", emoji("\U0001f680", "[APPLY]"), configFile)
 	if dryRun {
-		fmt.Println("   [DRY RUN MODE - No changes will be made]")
-		fmt.Println()
+		fmt.Fprintln(os.Stderr, "   [DRY RUN MODE - No changes will be made]")
+		fmt.Fprintln(os.Stderr)
 	} else {
-		fmt.Printf("   Target: %s (token: %s)\n\n", jiraURL, maskToken(jiraToken))
+		fmt.Fprintf(os.Stderr, "   Target: %s (token: %s)\n\n", jiraURL, maskToken(jiraToken))
+	}
+
+	// Read the config file once; reuse the bytes for the reviewed-marker check,
+	// schema validation, and deserialization.
+	rawBytes, readErr := os.ReadFile(filepath.Clean(configFile))
+	if readErr != nil {
+		return fmt.Errorf("failed to read config file: %w", readErr)
+	}
+
+	// Check for AI-generated, un-reviewed files.
+	if strings.Contains(string(rawBytes), "# reviewed: false") {
+		fmt.Fprintln(os.Stderr, "WARNING: This file was AI-generated and has not been marked as reviewed.")
+		fmt.Fprintln(os.Stderr, "         Edit the file and change '# reviewed: false' to '# reviewed: true' after manual review.")
+		if !dryRun {
+			if applyYes {
+				fmt.Fprintln(os.Stderr, "WARNING: Skipping review confirmation (--yes set).")
+			} else if !isTTY(os.Stdin) {
+				return errors.New("aborted: stdin is not interactive; use --yes to bypass the review gate or set '# reviewed: true' in the file")
+			} else {
+				if !confirmPrompt(os.Stderr, os.Stdin, "Proceed anyway? [y/N] ") {
+					return errors.New("aborted: review the AI-generated file before applying")
+				}
+			}
+		}
+	}
+
+	// Schema-validate the raw YAML BEFORE deserialization (OWASP ASVS V5.5).
+	if err := validation.ValidateRawYAML(rawBytes); err != nil {
+		return fmt.Errorf("config file failed schema validation: %w", err)
 	}
 
 	// Load config
-	cfg, err := config.LoadConfig(configFile)
+	cfg, err := config.LoadConfigFromBytes(rawBytes)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
@@ -60,12 +97,12 @@ func runApply() error {
 	errs := validateConfig(cfg)
 	hasErrors := false
 	for _, e := range errs {
-		if e.Severity == "error" {
+		if e.Severity == validation.SeverityError {
 			if !hasErrors {
-				fmt.Println("❌ Configuration has validation errors:")
+				fmt.Fprintf(os.Stderr, "%s Configuration has validation errors:\n", emoji("\u274c", "[ERR]"))
 				hasErrors = true
 			}
-			fmt.Printf("  - %s\n", e.String())
+			fmt.Fprintf(os.Stderr, "  - %s\n", e.String())
 		}
 	}
 	if hasErrors {
@@ -75,37 +112,59 @@ func runApply() error {
 	// Print warnings
 	hasWarnings := false
 	for _, e := range errs {
-		if e.Severity == "warning" {
+		if e.Severity == validation.SeverityWarning {
 			if !hasWarnings {
-				fmt.Println("⚠️  Warnings:")
+				fmt.Fprintf(os.Stderr, "%s  Warnings:\n", emoji("\u26a0\ufe0f", "[WARN]"))
 				hasWarnings = true
 			}
-			fmt.Printf("  - %s\n", e.String())
+			fmt.Fprintf(os.Stderr, "  - %s\n", e.String())
 		}
 	}
 	if hasWarnings {
-		fmt.Println()
+		fmt.Fprintln(os.Stderr)
 	}
 
-	// Create Jira client
-	var client *jira.Client
+	// Create Jira client (or a no-op stub for dry-run mode).
+	var client apply.JiraClient = dryRunClient{}
 	if !dryRun {
-		client = jira.NewClient(jiraURL, jiraToken, isCloud)
+		c, err := newJiraClient()
+		if err != nil {
+			return fmt.Errorf("create Jira client: %w", err)
+		}
+		client = c
 	}
 
 	// Create applier
 	applier := apply.NewApplier(cfg, client, verbose, dryRun, configFile)
 
 	// Apply
-	if err := applier.Apply(); err != nil {
+	if err := applier.Apply(context.Background()); err != nil {
 		return err
 	}
 
 	if !dryRun {
-		fmt.Println("\n🎉 All done! Issues have been created in Jira.")
+		fmt.Fprintf(os.Stderr, "\n%s All done! Issues have been created in Jira.\n", emoji("\U0001f389", "[DONE]"))
 	} else {
-		fmt.Println("\n✅ Dry run complete. No issues were created.")
+		fmt.Fprintf(os.Stderr, "\n%s Dry run complete. No issues were created.\n", emoji("\u2705", "[OK]"))
 	}
 
 	return nil
+}
+
+// dryRunClient is a no-op JiraClient used when --dry-run is set.
+// It satisfies the apply.JiraClient interface but performs no real API calls;
+// the Applier guards every client call with a dryRun check, so these methods
+// are only invoked if that guard is accidentally removed.
+type dryRunClient struct{}
+
+var _ apply.JiraClient = dryRunClient{}
+
+func (dryRunClient) CreateIssue(_ context.Context, _ *jira.CreateIssueRequest) (*jira.CreateIssueResponse, error) {
+	return &jira.CreateIssueResponse{Key: "DRY-RUN"}, nil
+}
+
+func (dryRunClient) CreateIssueLink(_ context.Context, _ *jira.IssueLinkRequest) error { return nil }
+
+func (dryRunClient) FetchIssueLinkTypes(_ context.Context) ([]jira.IssueLinkTypeInfo, error) {
+	return nil, nil
 }

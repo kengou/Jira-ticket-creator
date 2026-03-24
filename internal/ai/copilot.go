@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 
 	copilot "github.com/github/copilot-sdk/go"
 )
@@ -37,6 +38,9 @@ func newCopilotProvider(cfg Config) (Provider, error) {
 			"    --copilot-path /path/to/copilot\n"+
 			"    export COPILOT_CLI_PATH=/path/to/copilot", err)
 	}
+	if cfg.Verbose {
+		fmt.Printf("  🔍 Copilot CLI resolved: %s\n", cliPath)
+	}
 	return &copilotProvider{
 		cliPath:   cliPath,
 		model:     cfg.Model,
@@ -53,7 +57,11 @@ func (p *copilotProvider) Generate(ctx context.Context, userPrompt string) (stri
 	if err := client.Start(ctx); err != nil {
 		return "", fmt.Errorf("copilot: failed to start CLI: %w", err)
 	}
-	defer client.Stop() //nolint:errcheck
+	defer func() {
+		if stopErr := client.Stop(); stopErr != nil {
+			fmt.Fprintf(os.Stderr, "copilot: cleanup warning: %v\n", stopErr)
+		}
+	}()
 
 	sessionCfg := &copilot.SessionConfig{
 		OnPermissionRequest: denyAllPermissions,
@@ -62,9 +70,11 @@ func (p *copilotProvider) Generate(ctx context.Context, userPrompt string) (stri
 			Content: SystemPrompt(),
 		},
 	}
-	if p.model != "" {
-		sessionCfg.Model = p.model
+	model := p.model
+	if model == "" {
+		model = DefaultModel
 	}
+	sessionCfg.Model = model
 
 	session, err := client.CreateSession(ctx, sessionCfg)
 	if err != nil {
@@ -115,9 +125,17 @@ func discoverCopilotCLI(flagPath string) (string, error) {
 		}
 	}
 
-	// 4. VSCode extension directory
+	// 4. VSCode extension directory — least trusted source.
+	// The extensions directory is writable by the user and any process running
+	// as that user, so the binary could have been substituted.
 	if p := findCopilotInVSCode(); p != "" {
 		if validateExecutable(p) == nil {
+			fmt.Fprintf(os.Stderr,
+				"Warning: Copilot binary resolved from VSCode extensions directory:\n"+
+					"  %s\n"+
+					"This is the least trusted discovery method. The binary is not integrity-verified.\n"+
+					"For higher assurance, install via 'npm install -g @github/copilot' or use --copilot-path.\n\n",
+				p)
 			return p, nil
 		}
 	}
@@ -127,7 +145,11 @@ func discoverCopilotCLI(flagPath string) (string, error) {
 
 // validateExecutable checks that a path points to an existing, executable file.
 func validateExecutable(path string) error {
-	info, err := os.Stat(path)
+	absPath, absErr := filepath.Abs(path)
+	if absErr != nil {
+		return fmt.Errorf("cannot resolve executable path: %w", absErr)
+	}
+	info, err := os.Stat(absPath)
 	if err != nil {
 		return fmt.Errorf("not found: %w", err)
 	}
@@ -161,6 +183,7 @@ func findCopilotInVSCode() string {
 		return ""
 	}
 
-	// Use the last match (highest version when sorted lexicographically).
+	// Sort to ensure deterministic selection of the highest version.
+	sort.Strings(matches)
 	return matches[len(matches)-1]
 }

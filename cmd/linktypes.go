@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -69,9 +70,15 @@ func matchLinkTypes(types []jira.IssueLinkTypeInfo, search string) []jira.IssueL
 func runLinkTypes() error {
 	fmt.Printf("Fetching issue link types from %s...\n\n", jiraURL)
 
-	client := jira.NewClient(jiraURL, jiraToken, isCloud)
+	client, err := jira.NewClient(jiraURL, jiraToken, isCloud)
+	if err != nil {
+		return fmt.Errorf("create Jira client: %w", err)
+	}
 
-	types, err := client.FetchIssueLinkTypes()
+	spin := newSpinner("Fetching link types…")
+	spin.Start()
+	types, err := client.FetchIssueLinkTypes(context.Background())
+	spin.Stop()
 	if err != nil {
 		return fmt.Errorf("failed to fetch issue link types: %w", err)
 	}

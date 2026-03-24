@@ -7,8 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/kengou/Jira-ticket-creator/internal/jira"
 )
 
 var (
@@ -57,31 +60,63 @@ func Execute() error {
 }
 
 func init() {
-	// Persistent flags (available to all commands)
+	// Persistent flags (available to all commands).
+	// Sensitive values (jira-url, token) default to "" so that the actual values
+	// never appear in --help output. The env vars are applied in requireAuth().
 	rootCmd.PersistentFlags().StringVarP(&configFile, "file", "f", "", "YAML configuration file")
-	rootCmd.PersistentFlags().StringVar(&jiraURL, "jira-url", os.Getenv("JIRA_URL"), "Jira base URL")
-	rootCmd.PersistentFlags().StringVar(&jiraToken, "token", os.Getenv("JIRA_TOKEN"), "Jira PAT token")
+	rootCmd.PersistentFlags().StringVar(&jiraURL, "jira-url", "", "Jira base URL (env: JIRA_URL)")
+	rootCmd.PersistentFlags().StringVar(&jiraToken, "token", "", "Jira PAT token (env: JIRA_TOKEN)")
 	rootCmd.PersistentFlags().BoolVar(&verbose, "verbose", false, "Enable verbose output")
 	rootCmd.PersistentFlags().BoolVar(&isCloud, "cloud", false, "Use Jira Cloud API (v3) instead of Data Center (v2)")
 }
 
-// maskToken redacts a token for safe logging.
-func maskToken(_ string) string {
-	return "****"
+// newJiraClient creates a configured Jira client using the global flag values.
+func newJiraClient() (*jira.Client, error) {
+	return jira.NewClient(jiraURL, jiraToken, isCloud)
 }
 
-// requireAuth checks that Jira authentication flags are set.
+// maskToken redacts a token for safe logging, exposing only the last 4 characters.
+func maskToken(token string) string {
+	if len(token) < 12 {
+		return "****"
+	}
+	return "****" + token[len(token)-4:]
+}
+
+// useEmoji reports whether emoji output is appropriate (NO_COLOR is not set and TERM is not dumb).
+func useEmoji() bool {
+	return os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
+}
+
+// emoji returns e when emoji output is appropriate, otherwise fallback.
+func emoji(e, fallback string) string {
+	if useEmoji() {
+		return e
+	}
+	return fallback
+}
+
+// requireAuth applies env-var defaults and checks that Jira authentication is set.
 func requireAuth() error {
+	// Apply env var defaults when the flag was not explicitly provided.
+	if jiraURL == "" {
+		jiraURL = os.Getenv("JIRA_URL")
+	}
+	if jiraToken == "" {
+		jiraToken = os.Getenv("JIRA_TOKEN")
+	}
+
 	if jiraURL == "" {
 		return errors.New("jira URL is required (use --jira-url or set JIRA_URL)")
 	}
 	if jiraToken == "" {
 		return errors.New("jira token is required (use --token or set JIRA_TOKEN)")
 	}
+
 	// Warn when the token was provided via the CLI flag rather than the env var.
 	// CLI arguments are visible in process listings (ps aux) and shell history.
-	if jiraToken != "" && os.Getenv("JIRA_TOKEN") != jiraToken {
-		fmt.Fprintln(os.Stderr, "⚠️  Warning: --token passed on command line is visible in process listings; prefer setting JIRA_TOKEN env var")
+	if strings.TrimSpace(os.Getenv("JIRA_TOKEN")) != strings.TrimSpace(jiraToken) {
+		fmt.Fprintln(os.Stderr, emoji("\u26a0\ufe0f", "[WARN]")+"  Warning: --token passed on command line is visible in process listings; prefer setting JIRA_TOKEN env var")
 	}
 	return nil
 }

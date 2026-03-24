@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -105,24 +106,30 @@ func epicsToYAML(project string, epics []jira.Epic) ([]byte, error) {
 
 func runEpics() error {
 	if epicStatus != "" {
-		fmt.Printf("Fetching Epics for project %s (status: %s) from %s...\n\n", projectKey, epicStatus, jiraURL)
+		fmt.Fprintf(os.Stderr, "Fetching Epics for project %s (status: %s) from %s...\n\n", projectKey, epicStatus, jiraURL)
 	} else {
-		fmt.Printf("Fetching Epics for project %s from %s...\n\n", projectKey, jiraURL)
+		fmt.Fprintf(os.Stderr, "Fetching Epics for project %s from %s...\n\n", projectKey, jiraURL)
 	}
 
-	client := jira.NewClient(jiraURL, jiraToken, isCloud)
+	client, err := newJiraClient()
+	if err != nil {
+		return fmt.Errorf("create Jira client: %w", err)
+	}
 
-	epics, err := client.FetchEpics(projectKey, epicStatus)
+	spin := newSpinner("Fetching epics\u2026")
+	spin.Start()
+	epics, err := client.FetchEpics(context.Background(), projectKey, epicStatus)
+	spin.Stop()
 	if err != nil {
 		return fmt.Errorf("failed to fetch epics: %w", err)
 	}
 
 	if len(epics) == 0 {
-		fmt.Printf("No Epics found in project %s.\n", projectKey)
+		fmt.Fprintf(os.Stderr, "No Epics found in project %s.\n", projectKey)
 		return nil
 	}
 
-	fmt.Printf("Found %d Epic(s):\n\n", len(epics))
+	fmt.Fprintf(os.Stderr, "Found %d Epic(s):\n\n", len(epics))
 	fmt.Printf("  %-12s  %-14s  %s\n", "KEY", "STATUS", "SUMMARY")
 	fmt.Printf("  %-12s  %-14s  %s\n", "---", "------", "-------")
 
@@ -141,7 +148,7 @@ func runEpics() error {
 			return fmt.Errorf("failed to write YAML file %q: %w", epicsOutputFile, err)
 		}
 
-		fmt.Printf("\nEpics saved to %s\n", epicsOutputFile)
+		fmt.Fprintf(os.Stderr, "\nEpics saved to %s\n", epicsOutputFile)
 	}
 
 	return nil

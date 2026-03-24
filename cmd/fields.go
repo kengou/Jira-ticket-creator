@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -71,9 +72,15 @@ func matchFields(fields []jira.Field) []jira.Field {
 func runFields() error {
 	fmt.Printf("Fetching fields from %s...\n\n", jiraURL)
 
-	client := jira.NewClient(jiraURL, jiraToken, isCloud)
+	client, err := jira.NewClient(jiraURL, jiraToken, isCloud)
+	if err != nil {
+		return fmt.Errorf("create Jira client: %w", err)
+	}
 
-	fields, err := client.FetchFields()
+	spin := newSpinner("Fetching fields…")
+	spin.Start()
+	fields, err := client.FetchFields(context.Background())
+	spin.Stop()
 	if err != nil {
 		return fmt.Errorf("failed to fetch fields: %w", err)
 	}

@@ -27,6 +27,8 @@ func TestValidateFieldsFlags_AllPresent(t *testing.T) {
 func TestValidateFieldsFlags_MissingURL(t *testing.T) {
 	origURL := jiraURL
 	origToken := jiraToken
+	t.Setenv("JIRA_URL", "")
+	t.Setenv("JIRA_TOKEN", "")
 	defer func() {
 		jiraURL = origURL
 		jiraToken = origToken
@@ -43,6 +45,8 @@ func TestValidateFieldsFlags_MissingURL(t *testing.T) {
 func TestValidateFieldsFlags_MissingToken(t *testing.T) {
 	origURL := jiraURL
 	origToken := jiraToken
+	t.Setenv("JIRA_URL", "")
+	t.Setenv("JIRA_TOKEN", "")
 	defer func() {
 		jiraURL = origURL
 		jiraToken = origToken

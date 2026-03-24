@@ -8,6 +8,9 @@ import (
 	"errors"
 )
 
+// DefaultModel is the AI model used when the caller does not specify one.
+const DefaultModel = "claude-haiku-4-5"
+
 // Provider generates YAML from a plain-English prompt.
 type Provider interface {
 	Name() string
@@ -27,7 +30,8 @@ type Config struct {
 	// Copilot options
 	CopilotPath string // path to CLI binary; auto-detected if empty
 
-	MaxTokens int // defaults to 4096
+	MaxTokens int  // defaults to 4096
+	Verbose   bool // log extra diagnostic info (e.g. resolved CLI binary path)
 }
 
 // NewProvider constructs the appropriate Provider from cfg.
