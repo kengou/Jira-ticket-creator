@@ -19,24 +19,24 @@ var embeddedSchema []byte
 var (
 	onceSchema      sync.Once
 	cachedSchema    *jsonschema.Resolved
-	cachedSchemaErr error
+	errCachedSchema error
 )
 
 func resolveSchema() (*jsonschema.Resolved, error) {
 	onceSchema.Do(func() {
 		var s jsonschema.Schema
 		if err := json.Unmarshal(embeddedSchema, &s); err != nil {
-			cachedSchemaErr = fmt.Errorf("internal: embedded schema is invalid: %w", err)
+			errCachedSchema = fmt.Errorf("internal: embedded schema is invalid: %w", err)
 			return
 		}
 		rs, err := s.Resolve(nil)
 		if err != nil {
-			cachedSchemaErr = fmt.Errorf("internal: cannot resolve embedded schema: %w", err)
+			errCachedSchema = fmt.Errorf("internal: cannot resolve embedded schema: %w", err)
 			return
 		}
 		cachedSchema = rs
 	})
-	return cachedSchema, cachedSchemaErr
+	return cachedSchema, errCachedSchema
 }
 
 // SchemaViolationError is returned by ValidateRawYAML when the document does not

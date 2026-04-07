@@ -62,11 +62,12 @@ func runApply() error {
 		fmt.Fprintln(os.Stderr, "WARNING: This file was AI-generated and has not been marked as reviewed.")
 		fmt.Fprintln(os.Stderr, "         Edit the file and change '# reviewed: false' to '# reviewed: true' after manual review.")
 		if !dryRun {
-			if applyYes {
+			switch {
+			case applyYes:
 				fmt.Fprintln(os.Stderr, "WARNING: Skipping review confirmation (--yes set).")
-			} else if !isTTY(os.Stdin) {
+			case !isTTY(os.Stdin):
 				return errors.New("aborted: stdin is not interactive; use --yes to bypass the review gate or set '# reviewed: true' in the file")
-			} else {
+			default:
 				if !confirmPrompt(os.Stderr, os.Stdin, "Proceed anyway? [y/N] ") {
 					return errors.New("aborted: review the AI-generated file before applying")
 				}

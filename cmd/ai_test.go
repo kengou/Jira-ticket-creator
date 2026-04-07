@@ -64,6 +64,26 @@ func TestExtractYAML(t *testing.T) {
 			input: "```yaml\nschemaVersion: \"1.0\"\ndefaults:\n  projectKey: TEST\nissues:\n  - summary: foo\n```",
 			want:  "schemaVersion: \"1.0\"\ndefaults:\n  projectKey: TEST\nissues:\n  - summary: foo",
 		},
+		{
+			name:  "YAML between --- document separators with prose",
+			input: "I cannot access the file.\n\n---\n\nschemaVersion: \"1.0\"\nissues: []\n\n---\n\n> Note: replace POM-XXX.",
+			want:  "schemaVersion: \"1.0\"\nissues: []",
+		},
+		{
+			name:  "prose before --- then YAML, no trailing separator",
+			input: "Here is the plan:\n---\nschemaVersion: \"1.0\"\nissues: []",
+			want:  "schemaVersion: \"1.0\"\nissues: []",
+		},
+		{
+			name:  "no fences, no separators, prose before schemaVersion",
+			input: "Sure thing!\n\nschemaVersion: \"1.0\"\nissues: []",
+			want:  "schemaVersion: \"1.0\"\nissues: []",
+		},
+		{
+			name:  "CRLF line endings with fences",
+			input: "```yaml\r\nschemaVersion: \"1.0\"\r\n```",
+			want:  "schemaVersion: \"1.0\"",
+		},
 	}
 
 	for _, tc := range tests {

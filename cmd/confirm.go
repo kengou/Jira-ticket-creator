@@ -17,7 +17,7 @@ func confirmPrompt(w io.Writer, r io.Reader, msg string) bool {
 	if r == nil {
 		r = os.Stdin
 	}
-	fmt.Fprint(w, msg)
+	fmt.Fprint(w, msg) //nolint:errcheck // best-effort stderr prompt
 	var answer string
 	if _, err := fmt.Fscanln(r, &answer); err != nil {
 		return false

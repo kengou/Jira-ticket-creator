@@ -82,6 +82,14 @@
         "descriptionTemplate": {
           "type": "string",
           "description": "Template for rendering descriptions with variables"
+        },
+        "epicNameField": {
+          "type": "string",
+          "description": "Jira Data Center custom field ID for epic name (e.g., customfield_10544)"
+        },
+        "epicLinkField": {
+          "type": "string",
+          "description": "Jira Data Center custom field ID for epic link (e.g., customfield_10541)"
         }
       }
     },

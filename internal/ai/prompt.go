@@ -52,7 +52,6 @@ SCHEMA REFERENCE:
   defaults:
     projectKey: STRING           # required — Jira project key (e.g. "MYAPP")
     issueType: STRING            # optional default issue type
-    priority: STRING             # optional (Highest/High/Medium/Low/Lowest)
     reporter: STRING             # optional Jira username
     assignee: STRING             # optional Jira username
     labels: [STRING]
@@ -63,7 +62,6 @@ SCHEMA REFERENCE:
   validation:
     strictMode: BOOL
     allowedIssueTypes: [STRING]  # whitelist of valid issue types
-    allowedPriorities: [STRING]  # whitelist of valid priorities
   options:
     continueOnError: BOOL        # default false
     idempotencyEnabled: BOOL     # default true
@@ -75,7 +73,6 @@ SCHEMA REFERENCE:
       epicName: STRING           # Epics only: "CODE: Name"
       parent: STRING             # id of a local epic/story defined in this file
       epicLink: STRING           # Jira key of an existing epic, e.g. "PROJ-123"
-      priority: STRING
       labels: [STRING]
       components: [STRING]
       fixVersions: [STRING]
@@ -99,11 +96,6 @@ validation:
   allowedIssueTypes:
     - Epic
     - Story
-  allowedPriorities:
-    - Highest
-    - High
-    - Medium
-    - Low
 
 options:
   idempotencyEnabled: true

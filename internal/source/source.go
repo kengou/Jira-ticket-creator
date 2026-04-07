@@ -179,4 +179,3 @@ func BuildContextFromFiles(dir string, relPaths []string) (string, error) {
 
 	return b.String(), nil
 }
-

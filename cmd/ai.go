@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -32,6 +33,7 @@ var (
 	aiTimeout     int
 	aiYes         bool
 	aiIncludeDocs bool
+	aiEpicsFile   string
 )
 
 var aiCmd = &cobra.Command{
@@ -67,6 +69,7 @@ func init() {
 	aiCmd.Flags().IntVar(&aiTimeout, "timeout", 120, "Timeout in seconds for AI generation")
 	aiCmd.Flags().BoolVar(&aiYes, "yes", false, "Skip confirmation prompts (e.g. before sending source files to AI)")
 	aiCmd.Flags().BoolVar(&aiIncludeDocs, "include-docs", false, "Include .md and .txt files when scanning --source-dir (excluded by default to reduce prompt injection risk)")
+	aiCmd.Flags().StringVarP(&aiEpicsFile, "epics", "e", "", "Path to an epics YAML file; existing epics are injected into the AI prompt so it can use epicLink")
 
 	// Hide --claude-key from help output to discourage passing secrets via CLI flags.
 	// Users should prefer the ANTHROPIC_API_KEY environment variable.
@@ -79,16 +82,120 @@ func init() {
 // Capture group 1 contains the block content.
 var yamlFencedBlockRe = regexp.MustCompile("(?ms)^```(?:yaml)?[ \t]*\n(.*?)\n^```[ \t]*$")
 
+// schemaVersionRe matches the schemaVersion key at the start of a line.
+var schemaVersionRe = regexp.MustCompile(`(?m)^schemaVersion:`)
+
+// trailingDocSepRe matches a YAML document separator (---) on its own line.
+var trailingDocSepRe = regexp.MustCompile(`(?m)\n---[ \t]*$`)
+
 // extractYAML returns the content of the first fenced YAML block in s,
 // or the full string trimmed if no fences are found.
+// When fences are absent it falls back to locating the schemaVersion key
+// and extracting the YAML document around it — this handles AI output that
+// wraps YAML in --- document separators with explanatory prose before/after.
 func extractYAML(s string) string {
+	// Normalize line endings for reliable matching.
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+
+	// 1. Prefer fenced code blocks (```yaml … ```).
 	if m := yamlFencedBlockRe.FindStringSubmatch(s); m != nil {
 		return strings.TrimSpace(m[1])
 	}
+
+	// 2. Fallback: locate the schemaVersion key and extract the YAML
+	// document around it. AI providers sometimes emit prose before/after
+	// the YAML, optionally delimited by --- document separators.
+	if loc := schemaVersionRe.FindStringIndex(s); loc != nil {
+		body := s[loc[0]:]
+		// Trim at a trailing document separator (--- on its own line).
+		if sep := trailingDocSepRe.FindStringIndex(body); sep != nil {
+			body = body[:sep[0]]
+		}
+		return strings.TrimSpace(body)
+	}
+
 	return strings.TrimSpace(s)
 }
 
+// buildEpicsContext reads an epics YAML file and returns a prompt section
+// listing existing epic keys and names so the AI can use epicLink correctly.
+func buildEpicsContext(path string) (string, error) {
+	cfg, err := config.LoadConfig(path)
+	if err != nil {
+		return "", fmt.Errorf("load epics file: %w", err)
+	}
+	var lines []string
+	for _, issue := range cfg.Issues {
+		if !strings.EqualFold(issue.IssueType, "Epic") {
+			continue
+		}
+		key := issue.ID
+		name := issue.EpicName
+		if name == "" {
+			name = issue.Summary
+		}
+		lines = append(lines, fmt.Sprintf("- %s: %s", key, name))
+	}
+	if len(lines) == 0 {
+		return "", fmt.Errorf("no epics found in %s", path)
+	}
+	return "EXISTING EPICS IN JIRA:\n" +
+		strings.Join(lines, "\n") +
+		"\n\nINSTRUCTION: Try to match generated issues to one of the existing epics above using epicLink with the epic's Jira key (e.g. epicLink: POM-1062). " +
+		"If none of the existing epics is a good fit, create a new Epic issue in the output and use parent to link stories to it.", nil
+}
+
 func runAI() error {
+	interactive := interactiveEnabled() && !aiYes
+
+	// --- Interactive prompts for missing inputs ---
+	if interactive {
+		reader := bufio.NewReader(os.Stdin)
+		w := os.Stderr
+
+		// 1. Provider
+		if !aiUseClaude && !aiUseOpencode && !aiUseCopilot {
+			idx := promptSelect(w, reader, "\nSelect AI provider:", []string{
+				"GitHub Copilot",
+				"Anthropic Claude",
+				"OpenCode (local daemon)",
+			})
+			switch idx {
+			case 0:
+				aiUseCopilot = true
+			case 1:
+				aiUseClaude = true
+			case 2:
+				aiUseOpencode = true
+			default:
+				return errors.New("invalid provider selection")
+			}
+		}
+
+		// 2. Prompt
+		if aiPrompt == "" {
+			aiPrompt = promptLine(w, reader, "\nDescribe the Jira plan to generate:\n> ")
+			if aiPrompt == "" {
+				return errors.New("prompt cannot be empty")
+			}
+		}
+
+		// 3. Epics file
+		if aiEpicsFile == "" {
+			if ep := promptLine(w, reader, "\nEpics file to match against (leave empty to skip): "); ep != "" {
+				aiEpicsFile = ep
+			}
+		}
+
+		// 4. Output file
+		if aiOutput == "" {
+			if out := promptLine(w, reader, "\nOutput YAML path (leave empty for stdout): "); out != "" {
+				aiOutput = out
+			}
+		}
+		fmt.Fprintln(w) //nolint:errcheck
+	}
+
 	if aiPrompt == "" {
 		return errors.New("--prompt / -p is required")
 	}
@@ -146,6 +253,15 @@ func runAI() error {
 		}
 	}
 
+	if aiEpicsFile != "" {
+		epicsCtx, err := buildEpicsContext(aiEpicsFile)
+		if err != nil {
+			return fmt.Errorf("--epics: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Loaded epics from %s\n\n", aiEpicsFile)
+		userPrompt = epicsCtx + "\n\n" + userPrompt
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(aiTimeout)*time.Second)
 	defer cancel()
 
@@ -173,7 +289,7 @@ func runAI() error {
 			_, writeErr := fmt.Fprint(tmpFile, raw)
 			closeErr := tmpFile.Close()
 			if writeErr == nil && closeErr == nil {
-				fmt.Fprintf(os.Stderr, "Raw AI output saved to: %s\n", tmpName)
+				fmt.Fprintf(os.Stderr, "Raw AI output saved to: %s\n", tmpName) //nolint:gosec // tmpName is from os.CreateTemp, not user input
 				return fmt.Errorf("AI output failed schema validation: %w", schemaErr)
 			}
 		}
@@ -192,7 +308,7 @@ func runAI() error {
 			_, writeErr := fmt.Fprint(tmpFile, raw)
 			closeErr := tmpFile.Close()
 			if writeErr == nil && closeErr == nil {
-				fmt.Fprintf(os.Stderr, "Raw AI output saved to: %s\n", tmpName)
+				fmt.Fprintf(os.Stderr, "Raw AI output saved to: %s\n", tmpName) //nolint:gosec // tmpName is from os.CreateTemp, not user input
 				return fmt.Errorf("AI output is not valid YAML: %w", err)
 			}
 		}
