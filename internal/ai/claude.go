@@ -26,9 +26,9 @@ func newClaudeProvider(cfg Config) (Provider, error) {
 		return nil, errors.New("anthropic API key required: set ANTHROPIC_API_KEY env var")
 	}
 
-	model := anthropic.Model(cfg.Model)
+	model := cfg.Model
 	if model == "" {
-		model = anthropic.Model(DefaultModel)
+		model = DefaultModel
 	}
 
 	client := anthropic.NewClient(option.WithAPIKey(key))
