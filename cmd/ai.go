@@ -289,7 +289,7 @@ func runAI() error {
 			_, writeErr := fmt.Fprint(tmpFile, raw)
 			closeErr := tmpFile.Close()
 			if writeErr == nil && closeErr == nil {
-				fmt.Fprintf(os.Stderr, "Raw AI output saved to: %s\n", tmpName) //nolint:gosec // tmpName is from os.CreateTemp, not user input
+				fmt.Fprintf(os.Stderr, "Raw AI output saved to: %s\n", tmpName)
 				return fmt.Errorf("AI output failed schema validation: %w", schemaErr)
 			}
 		}
@@ -308,7 +308,7 @@ func runAI() error {
 			_, writeErr := fmt.Fprint(tmpFile, raw)
 			closeErr := tmpFile.Close()
 			if writeErr == nil && closeErr == nil {
-				fmt.Fprintf(os.Stderr, "Raw AI output saved to: %s\n", tmpName) //nolint:gosec // tmpName is from os.CreateTemp, not user input
+				fmt.Fprintf(os.Stderr, "Raw AI output saved to: %s\n", tmpName)
 				return fmt.Errorf("AI output is not valid YAML: %w", err)
 			}
 		}
