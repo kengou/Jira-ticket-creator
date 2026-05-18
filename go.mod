@@ -1,4 +1,4 @@
-module github.com/kengou/Jira-ticket-creator
+module github.com/kengou/jira-ticket-creator
 
 go 1.26
 
