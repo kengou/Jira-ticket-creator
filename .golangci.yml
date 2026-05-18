@@ -36,6 +36,9 @@ linters:
       check-blank: true
     goconst:
       min-occurrences: 5
+      # golangci-lint v2.12 counts string occurrences in _test.go files;
+      # test fixtures legitimately repeat literals, so exclude them.
+      ignore-tests: true
     gocritic:
       enabled-checks:
         - boolExprSimplify
