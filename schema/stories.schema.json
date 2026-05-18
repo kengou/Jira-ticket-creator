@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://github.com/kengou/Jira-ticket-creator/schema/stories.schema.json",
+  "$id": "https://github.com/kengou/jira-ticket-creator/schema/stories.schema.json",
   "title": "jira-ai-creator Configuration Schema",
   "description": "Schema for defining Jira issues to be created by jira-ai-creator",
   "type": "object",

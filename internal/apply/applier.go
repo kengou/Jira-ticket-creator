@@ -11,9 +11,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kengou/Jira-ticket-creator/internal/config"
-	"github.com/kengou/Jira-ticket-creator/internal/jira"
-	"github.com/kengou/Jira-ticket-creator/internal/state"
+	"github.com/kengou/jira-ticket-creator/internal/config"
+	"github.com/kengou/jira-ticket-creator/internal/jira"
+	"github.com/kengou/jira-ticket-creator/internal/state"
 )
 
 // JiraClient is the subset of the Jira API used by Applier.
