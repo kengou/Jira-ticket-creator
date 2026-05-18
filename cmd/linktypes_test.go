@@ -3,7 +3,7 @@ package cmd
 import (
 	"testing"
 
-	"github.com/kengou/Jira-ticket-creator/internal/jira"
+	"github.com/kengou/jira-ticket-creator/internal/jira"
 )
 
 func TestValidateLinkTypesFlags_NoURL(t *testing.T) {

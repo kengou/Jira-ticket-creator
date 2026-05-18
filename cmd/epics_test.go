@@ -6,7 +6,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"github.com/kengou/Jira-ticket-creator/internal/jira"
+	"github.com/kengou/jira-ticket-creator/internal/jira"
 )
 
 const (

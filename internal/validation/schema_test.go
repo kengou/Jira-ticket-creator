@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kengou/Jira-ticket-creator/internal/validation"
+	"github.com/kengou/jira-ticket-creator/internal/validation"
 )
 
 // minimalValidYAML is the smallest document that satisfies the schema.

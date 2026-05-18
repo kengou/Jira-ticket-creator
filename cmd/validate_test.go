@@ -3,9 +3,9 @@ package cmd
 import (
 	"testing"
 
-	"github.com/kengou/Jira-ticket-creator/internal/config"
-	"github.com/kengou/Jira-ticket-creator/internal/jira"
-	"github.com/kengou/Jira-ticket-creator/internal/validation"
+	"github.com/kengou/jira-ticket-creator/internal/config"
+	"github.com/kengou/jira-ticket-creator/internal/jira"
+	"github.com/kengou/jira-ticket-creator/internal/validation"
 )
 
 // --- validateConfig ---

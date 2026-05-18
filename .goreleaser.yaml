@@ -2,7 +2,7 @@ project_name: jira-ai-creator
 release:
   github:
     owner: kengou
-    name: Jira-ticket-creator
+    name: jira-ticket-creator
 builds:
   - main: ./main.go
     goos:

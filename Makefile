@@ -1,5 +1,5 @@
 BINARY    := jira-ai-creator
-MODULE    := github.com/kengou/Jira-ticket-creator
+MODULE    := github.com/kengou/jira-ticket-creator
 GO        := go
 GOFLAGS   :=
 LDFLAGS   := -s -w

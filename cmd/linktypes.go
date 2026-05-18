@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/kengou/Jira-ticket-creator/internal/jira"
+	"github.com/kengou/jira-ticket-creator/internal/jira"
 )
 
 var linkTypeSearch string

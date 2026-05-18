@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/kengou/Jira-ticket-creator/internal/config"
+	"github.com/kengou/jira-ticket-creator/internal/config"
 )
 
 // jiraKeyRE matches a valid Jira issue key (e.g. "DEMO-2679").

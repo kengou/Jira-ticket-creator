@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/kengou/Jira-ticket-creator/cmd"
+	"github.com/kengou/jira-ticket-creator/cmd"
 )
 
 func main() {

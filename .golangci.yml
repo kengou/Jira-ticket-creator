@@ -86,4 +86,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/kengou/Jira-ticket-creator
+        - github.com/kengou/jira-ticket-creator

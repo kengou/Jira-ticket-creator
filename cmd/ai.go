@@ -13,10 +13,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/kengou/Jira-ticket-creator/internal/ai"
-	"github.com/kengou/Jira-ticket-creator/internal/config"
-	"github.com/kengou/Jira-ticket-creator/internal/source"
-	"github.com/kengou/Jira-ticket-creator/internal/validation"
+	"github.com/kengou/jira-ticket-creator/internal/ai"
+	"github.com/kengou/jira-ticket-creator/internal/config"
+	"github.com/kengou/jira-ticket-creator/internal/source"
+	"github.com/kengou/jira-ticket-creator/internal/validation"
 )
 
 var (

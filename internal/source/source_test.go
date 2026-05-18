@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kengou/Jira-ticket-creator/internal/source"
+	"github.com/kengou/jira-ticket-creator/internal/source"
 )
 
 // makeDir creates a temp directory and writes the given files into it.

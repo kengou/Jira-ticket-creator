@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kengou/Jira-ticket-creator/internal/config"
-	"github.com/kengou/Jira-ticket-creator/internal/jira"
+	"github.com/kengou/jira-ticket-creator/internal/config"
+	"github.com/kengou/jira-ticket-creator/internal/jira"
 )
 
 // mockClient implements JiraClient for testing.

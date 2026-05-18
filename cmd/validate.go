@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/kengou/Jira-ticket-creator/internal/config"
-	"github.com/kengou/Jira-ticket-creator/internal/validation"
+	"github.com/kengou/jira-ticket-creator/internal/config"
+	"github.com/kengou/jira-ticket-creator/internal/validation"
 )
 
 // ValidationError is a type alias for validation.Error so that existing code

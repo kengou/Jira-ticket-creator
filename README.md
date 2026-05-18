@@ -75,4 +75,4 @@ issues:
 
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
 
-# Jira-ticket-creator
+# jira-ticket-creator
