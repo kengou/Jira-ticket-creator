@@ -413,29 +413,33 @@ func BuildIssueFields(projectKey string, fields map[string]any) map[string]any {
 	return result
 }
 
+// nameField is the JSON key Jira uses to reference a named entity
+// (issue type, priority, user, component, version) by its name.
+const nameField = "name"
+
 // FormatIssueType formats an issue type for the Jira API.
 func FormatIssueType(name string) map[string]any {
-	return map[string]any{"name": name}
+	return map[string]any{nameField: name}
 }
 
 // FormatPriority formats a priority for the Jira API.
 func FormatPriority(name string) map[string]any {
-	return map[string]any{"name": name}
+	return map[string]any{nameField: name}
 }
 
 // FormatUser formats a user for the Jira API.
 func FormatUser(username string) map[string]any {
-	return map[string]any{"name": username}
+	return map[string]any{nameField: username}
 }
 
 // FormatComponent formats a component for the Jira API.
 func FormatComponent(name string) map[string]any {
-	return map[string]any{"name": name}
+	return map[string]any{nameField: name}
 }
 
 // FormatVersion formats a version for the Jira API.
 func FormatVersion(name string) map[string]any {
-	return map[string]any{"name": name}
+	return map[string]any{nameField: name}
 }
 
 // Epic represents a Jira Epic with its key fields.
