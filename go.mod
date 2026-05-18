@@ -4,8 +4,8 @@ go 1.26
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.30.0
-	github.com/github/copilot-sdk/go v0.2.1
-	github.com/google/jsonschema-go v0.4.2
+	github.com/github/copilot-sdk/go v0.2.2
+	github.com/google/jsonschema-go v0.4.3
 	github.com/spf13/cobra v1.10.2
 	github.com/sst/opencode-sdk-go v0.19.2
 	sigs.k8s.io/yaml v1.6.0

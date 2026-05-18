@@ -87,10 +87,16 @@ func (p *copilotProvider) Generate(ctx context.Context, userPrompt string) (stri
 	if err != nil {
 		return "", fmt.Errorf("copilot: request failed: %w", err)
 	}
-	if event == nil || event.Data.Content == nil {
+	if event == nil {
 		return "", errors.New("copilot: empty response")
 	}
-	return *event.Data.Content, nil
+	// copilot-sdk v0.2.2+ models SessionEventData as an interface; a completed
+	// SendAndWait yields the final assistant message event.
+	msg, ok := event.Data.(*copilot.AssistantMessageData)
+	if !ok {
+		return "", errors.New("copilot: empty response")
+	}
+	return msg.Content, nil
 }
 
 // discoverCopilotCLI locates the Copilot CLI binary using a 4-step search:
