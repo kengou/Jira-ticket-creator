@@ -1,5 +1,10 @@
 # jira-ai-creator
 
+[![Test](https://github.com/kengou/jira-ticket-creator/actions/workflows/test.yml/badge.svg)](https://github.com/kengou/jira-ticket-creator/actions/workflows/test.yml)
+[![Docker](https://github.com/kengou/jira-ticket-creator/actions/workflows/docker.yml/badge.svg)](https://github.com/kengou/jira-ticket-creator/actions/workflows/docker.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/kengou/jira-ticket-creator/badge)](https://securityscorecards.dev/viewer/?uri=github.com/kengou/jira-ticket-creator)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
 > **Declarative Jira issue creation from YAML** — define once, create anywhere.
 
 A production-ready CLI tool for creating Jira issues from YAML configuration files. Define Epics, Stories, and Bugs declaratively, run one command, and watch your issues appear in Jira with proper dependencies and relationships.
