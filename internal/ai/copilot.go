@@ -12,13 +12,15 @@ import (
 	"sort"
 
 	copilot "github.com/github/copilot-sdk/go"
+	"github.com/github/copilot-sdk/go/rpc"
 )
 
 // denyAllPermissions is a restrictive permission handler that denies every
 // permission request from the Copilot agent. YAML generation does not require
 // filesystem writes, shell execution, or network access beyond the Copilot API.
-func denyAllPermissions(_ copilot.PermissionRequest, _ copilot.PermissionInvocation) (copilot.PermissionRequestResult, error) {
-	return copilot.PermissionRequestResult{}, errors.New("permission denied: jira-ai-creator does not grant Copilot agent permissions")
+func denyAllPermissions(_ copilot.PermissionRequest, _ copilot.PermissionInvocation) (rpc.PermissionDecision, error) {
+	feedback := "jira-ai-creator does not grant Copilot agent permissions"
+	return &rpc.PermissionDecisionReject{Feedback: &feedback}, nil
 }
 
 type copilotProvider struct {
@@ -52,7 +54,7 @@ func (p *copilotProvider) Name() string { return "GitHub Copilot" }
 
 func (p *copilotProvider) Generate(ctx context.Context, userPrompt string) (string, error) {
 	client := copilot.NewClient(&copilot.ClientOptions{
-		CLIPath: p.cliPath,
+		Connection: copilot.StdioConnection{Path: p.cliPath},
 	})
 	if err := client.Start(ctx); err != nil {
 		return "", fmt.Errorf("copilot: failed to start CLI: %w", err)
@@ -70,11 +72,9 @@ func (p *copilotProvider) Generate(ctx context.Context, userPrompt string) (stri
 			Content: SystemPrompt(),
 		},
 	}
-	model := p.model
-	if model == "" {
-		model = DefaultModel
+	if p.model != "" {
+		sessionCfg.Model = p.model
 	}
-	sessionCfg.Model = model
 
 	session, err := client.CreateSession(ctx, sessionCfg)
 	if err != nil {
@@ -97,6 +97,30 @@ func (p *copilotProvider) Generate(ctx context.Context, userPrompt string) (stri
 		return "", errors.New("copilot: empty response")
 	}
 	return msg.Content, nil
+}
+
+func (p *copilotProvider) ListModels(ctx context.Context) ([]string, error) {
+	client := copilot.NewClient(&copilot.ClientOptions{
+		Connection: copilot.StdioConnection{Path: p.cliPath},
+	})
+	if err := client.Start(ctx); err != nil {
+		return nil, fmt.Errorf("copilot: failed to start CLI: %w", err)
+	}
+	defer func() {
+		if stopErr := client.Stop(); stopErr != nil {
+			fmt.Fprintf(os.Stderr, "copilot: cleanup warning: %v\n", stopErr)
+		}
+	}()
+
+	models, err := client.ListModels(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("copilot: failed to list models: %w", err)
+	}
+	names := make([]string, len(models))
+	for i, m := range models {
+		names[i] = m.ID
+	}
+	return names, nil
 }
 
 // discoverCopilotCLI locates the Copilot CLI binary using a 4-step search:

@@ -34,6 +34,7 @@ var (
 	aiYes         bool
 	aiIncludeDocs bool
 	aiEpicsFile   string
+	aiListModels  bool
 )
 
 var aiCmd = &cobra.Command{
@@ -70,6 +71,7 @@ func init() {
 	aiCmd.Flags().BoolVar(&aiYes, "yes", false, "Skip confirmation prompts (e.g. before sending source files to AI)")
 	aiCmd.Flags().BoolVar(&aiIncludeDocs, "include-docs", false, "Include .md and .txt files when scanning --source-dir (excluded by default to reduce prompt injection risk)")
 	aiCmd.Flags().StringVarP(&aiEpicsFile, "epics", "e", "", "Path to an epics YAML file; existing epics are injected into the AI prompt so it can use epicLink")
+	aiCmd.Flags().BoolVar(&aiListModels, "list-models", false, "List available models for the selected provider and exit")
 
 	// Hide --claude-key from help output to discourage passing secrets via CLI flags.
 	// Users should prefer the ANTHROPIC_API_KEY environment variable.
@@ -146,7 +148,7 @@ func buildEpicsContext(path string) (string, error) {
 }
 
 func runAI() error {
-	interactive := interactiveEnabled() && !aiYes
+	interactive := interactiveEnabled() && !aiYes && !aiListModels
 
 	// --- Interactive prompts for missing inputs ---
 	if interactive {
@@ -196,7 +198,7 @@ func runAI() error {
 		fmt.Fprintln(w) //nolint:errcheck
 	}
 
-	if aiPrompt == "" {
+	if aiPrompt == "" && !aiListModels {
 		return errors.New("--prompt / -p is required")
 	}
 
@@ -218,6 +220,24 @@ func runAI() error {
 	})
 	if err != nil {
 		return err
+	}
+
+	if aiListModels {
+		lister, ok := provider.(ai.ModelLister)
+		if !ok {
+			return fmt.Errorf("provider %s does not support listing models", provider.Name())
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(aiTimeout)*time.Second)
+		defer cancel()
+		models, listErr := lister.ListModels(ctx)
+		if listErr != nil {
+			return listErr
+		}
+		fmt.Fprintf(os.Stderr, "Available models for %s:\n", provider.Name())
+		for _, m := range models {
+			fmt.Println(m)
+		}
+		return nil
 	}
 
 	fmt.Fprintf(os.Stderr, "%s Generating with %s…\n\n", emoji("🤖", "[AI]"), provider.Name())

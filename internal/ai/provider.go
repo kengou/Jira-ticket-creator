@@ -17,6 +17,12 @@ type Provider interface {
 	Generate(ctx context.Context, userPrompt string) (string, error)
 }
 
+// ModelLister is an optional interface that providers can implement to list
+// available models. Use a type assertion to check: if ml, ok := p.(ModelLister); ok { ... }
+type ModelLister interface {
+	ListModels(ctx context.Context) ([]string, error)
+}
+
 // Config holds the configuration for constructing a Provider.
 type Config struct {
 	UseClaude   bool
