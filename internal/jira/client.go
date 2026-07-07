@@ -6,6 +6,7 @@ package jira
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kengou/jira-ticket-creator/internal/adf"
 )
 
 // maxResponseBodySize caps the number of bytes read from a Jira API response
@@ -34,10 +37,15 @@ const DefaultEpicLinkField = "customfield_10009"
 // projectKeyRE matches a valid Jira project key (e.g. "PROJ", "ABC123").
 var projectKeyRE = regexp.MustCompile(`^[A-Z][A-Z0-9]+$`)
 
+// epicFields is the set of Jira fields fetched for every epic. Shared by the
+// Cloud and Data Center search paths so both request the same fields.
+var epicFields = []string{"summary", "status", "description"}
+
 // Client is a Jira REST API client with retry support.
 type Client struct {
 	baseURL    string
-	token      string
+	mode       Mode
+	creds      Credentials
 	apiVersion string // "2" for Data Center, "3" for Cloud
 	httpClient *http.Client
 
@@ -137,24 +145,42 @@ func normalizeURL(rawURL string) (string, error) {
 	return rawURL, nil
 }
 
-// NewClient creates a new Jira client.
+// NewClient creates a new Jira client using the legacy boolean surface.
 // Set isCloud to true for Jira Cloud (API v3), false for Data Center (API v2).
+// It is a thin wrapper over NewClientWithMode kept for backward compatibility:
+// Data Center callers (isCloud=false) get byte-for-byte identical behavior
+// (Bearer auth, /rest/api/2/ paths).
+// isCloud=true is retained for signature compatibility but returns an error because Jira Cloud
+// requires an email; Cloud callers must use NewClientWithMode.
 // Returns an error if baseURL uses a non-loopback http:// scheme.
 func NewClient(baseURL, token string, isCloud bool, opts ...ClientOption) (*Client, error) {
-	apiVersion := "2"
+	mode := ModeDataCenter
 	if isCloud {
-		apiVersion = "3"
+		mode = ModeCloud
 	}
+	return NewClientWithMode(baseURL, mode, Credentials{Token: token}, opts...)
+}
 
+// NewClientWithMode creates a new Jira client with an explicitly resolved
+// platform mode and credentials. This is the primary construction surface:
+// mode + credentials are supplied as one coherent input so downstream features
+// branch on the client's stored mode without re-inspecting URLs or env vars.
+// Returns an error if baseURL uses a non-loopback http:// scheme.
+func NewClientWithMode(baseURL string, mode Mode, creds Credentials, opts ...ClientOption) (*Client, error) {
 	normalizedURL, err := normalizeURL(baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid Jira URL: %w", err)
 	}
 
+	if mode == ModeCloud && strings.TrimSpace(creds.Email) == "" {
+		return nil, errors.New("jira Cloud mode requires an email for Basic auth (email + API token); use NewClientWithMode with Credentials.Email set")
+	}
+
 	c := &Client{
 		baseURL:    normalizedURL,
-		token:      token,
-		apiVersion: apiVersion,
+		mode:       mode,
+		creds:      creds,
+		apiVersion: mode.APIVersion(),
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 			// Go 1.8+ strips the Authorization header on cross-domain redirects,
@@ -204,6 +230,25 @@ type SearchIssue struct {
 	Fields map[string]any `json:"fields"`
 }
 
+// cloudSearchResult represents a Jira Cloud POST /rest/api/3/search/jql response.
+// The Cloud endpoint carries NO "total" — pagination is driven by NextPageToken
+// and IsLast, so the fetch loop must never rely on a count.
+type cloudSearchResult struct {
+	Issues        []SearchIssue `json:"issues"`
+	NextPageToken string        `json:"nextPageToken"`
+	IsLast        bool          `json:"isLast"`
+}
+
+// cloudSearchRequest is the POST body for the Cloud search/jql endpoint. The
+// NextPageToken is omitted on the first request and set to the previous page's
+// token thereafter.
+type cloudSearchRequest struct {
+	JQL           string   `json:"jql"`
+	MaxResults    int      `json:"maxResults"`
+	Fields        []string `json:"fields"`
+	NextPageToken string   `json:"nextPageToken,omitempty"`
+}
+
 // IssueLinkRequest represents an issue link creation request.
 type IssueLinkRequest struct {
 	Type         IssueLinkType `json:"type"`
@@ -222,9 +267,10 @@ type IssueRef struct {
 	Key string `json:"key"`
 }
 
-// LinkComment represents a comment on a link.
+// LinkComment represents a comment on a link. Body is a string for Jira Data
+// Center (wiki markup) and an ADF document (map[string]any) for Jira Cloud.
 type LinkComment struct {
-	Body string `json:"body"`
+	Body any `json:"body"`
 }
 
 // CreateIssue creates a new issue in Jira.
@@ -291,7 +337,7 @@ func (c *Client) doRequest(ctx context.Context, method, endpoint string, body an
 	}
 	safeURL := parsedURL.String()
 
-	authHeader := "Bearer " + c.token
+	authHeader := c.authHeader()
 	var lastErr error
 	rateLimited := false // true when previous attempt got a 429 and already slept
 
@@ -378,12 +424,26 @@ func (c *Client) doRequest(ctx context.Context, method, endpoint string, body an
 
 		// Server errors - retry
 		if resp.StatusCode >= 500 {
-			lastErr = fmt.Errorf("server error (%d): %s", resp.StatusCode, string(respBody))
+			body := string(respBody)
+			if len(body) > 500 {
+				body = body[:500] + "... (truncated)"
+			}
+			lastErr = fmt.Errorf("server error (%d): %s", resp.StatusCode, body)
 			continue
 		}
 	}
 
 	return fmt.Errorf("request failed after %d attempts: %w", c.MaxRetries+1, lastErr)
+}
+
+// authHeader returns the Authorization header value for the client's mode.
+// Cloud mode uses Basic base64(email:token); Data Center mode uses Bearer token.
+func (c *Client) authHeader() string {
+	if c.mode == ModeCloud {
+		raw := c.creds.Email + ":" + c.creds.Token
+		return "Basic " + base64.StdEncoding.EncodeToString([]byte(raw))
+	}
+	return "Bearer " + c.creds.Token
 }
 
 // APIError represents a Jira API error.
@@ -512,21 +572,27 @@ func (c *Client) FetchIssueLinkTypes(ctx context.Context) ([]IssueLinkTypeInfo, 
 // If statusFilter is non-empty, only epics matching that status are returned.
 // Prefix the status with "NOT:" to negate it (e.g. "NOT:Done" means status != Done).
 // It paginates through results automatically and returns all epics found.
+// On Jira Cloud it uses the search/jql endpoint with nextPageToken pagination and
+// flattens ADF descriptions to plain text; on Data Center it uses the legacy
+// /search endpoint with startAt/total pagination and string descriptions.
 // Returns an error if projectKey is not a valid Jira project key.
 func (c *Client) FetchEpics(ctx context.Context, projectKey, statusFilter string) ([]Epic, error) {
 	if !projectKeyRE.MatchString(projectKey) {
 		return nil, fmt.Errorf("invalid project key %q: must match ^[A-Z][A-Z0-9]+$", projectKey)
 	}
 
-	jql := fmt.Sprintf(`project = %q AND issuetype = Epic`, projectKey)
-	if statusFilter != "" {
-		if after, ok := strings.CutPrefix(statusFilter, "NOT:"); ok {
-			jql += fmt.Sprintf(` AND status != %q`, after)
-		} else {
-			jql += fmt.Sprintf(` AND status = %q`, statusFilter)
-		}
+	jql := buildEpicJQL(projectKey, statusFilter)
+
+	// Deliberate two-path dispatch: Cloud uses the POST search/jql endpoint with
+	// nextPageToken pagination and ADF description flattening; Data Center uses the
+	// legacy GET /search endpoint with startAt/total pagination and string
+	// descriptions. These paths diverge enough to warrant separate helpers rather
+	// than a shared abstraction. If additional endpoints diverge by mode, extract
+	// a mode-specific search strategy interface instead.
+	if c.mode == ModeCloud {
+		return c.fetchEpicsCloud(ctx, jql)
 	}
-	jql += ` ORDER BY created DESC`
+
 	const pageSize = 50
 
 	// Pre-compute the endpoint and base query parameters; only startAt changes per page.
@@ -534,9 +600,9 @@ func (c *Client) FetchEpics(ctx context.Context, projectKey, statusFilter string
 	params := url.Values{}
 	params.Set("jql", jql)
 	params.Set("maxResults", strconv.Itoa(pageSize))
-	params.Set("fields", "summary,status,description")
+	params.Set("fields", strings.Join(epicFields, ","))
 
-	var epics []Epic
+	epics := make([]Epic, 0, pageSize)
 	startAt := 0
 
 	for {
@@ -573,6 +639,135 @@ func (c *Client) FetchEpics(ctx context.Context, projectKey, statusFilter string
 	}
 
 	return epics, nil
+}
+
+// jqlQuote escapes a string for use as a JQL string literal and returns it
+// double-quoted. It escapes backslashes first, then double-quote characters, per
+// the Jira JQL string rules. Example: jqlQuote(`a"b\c`) → `"a\"b\\c"`.
+func jqlQuote(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return `"` + s + `"`
+}
+
+// buildEpicJQL constructs the JQL used to list a project's epics, shared by the
+// Cloud and Data Center paths so both platforms issue identical queries. The
+// statusFilter accepts a plain status ("Done" → status = "Done") or a "NOT:"
+// prefixed status ("NOT:Done" → status != "Done"); an empty filter omits the
+// status clause. Results are ordered by created date, descending.
+func buildEpicJQL(projectKey, statusFilter string) string {
+	jql := `project = ` + jqlQuote(projectKey) + ` AND issuetype = Epic`
+	if statusFilter != "" {
+		if after, ok := strings.CutPrefix(statusFilter, "NOT:"); ok {
+			jql += ` AND status != ` + jqlQuote(after)
+		} else {
+			jql += ` AND status = ` + jqlQuote(statusFilter)
+		}
+	}
+	jql += ` ORDER BY created DESC`
+	return jql
+}
+
+// fetchEpicsCloud fetches epics from the Jira Cloud search/jql endpoint. It
+// paginates with nextPageToken and terminates on the FIRST of: IsLast true, an
+// absent/empty next token, an empty page, or a page that yields no new issue keys
+// (a guard against the endpoint's known page-repeat quirk — there is no "total"
+// to rely on). Cloud descriptions arrive as ADF objects and are flattened to
+// plain text.
+func (c *Client) fetchEpicsCloud(ctx context.Context, jql string) ([]Epic, error) {
+	const pageSize = 50
+	endpoint := fmt.Sprintf("/rest/api/%s/search/jql", c.apiVersion)
+
+	epics := make([]Epic, 0, pageSize)
+	seen := make(map[string]bool)
+	token := ""
+
+	for {
+		reqBody := cloudSearchRequest{
+			JQL:           jql,
+			MaxResults:    pageSize,
+			Fields:        epicFields,
+			NextPageToken: token,
+		}
+
+		var result cloudSearchResult
+		if err := c.doRequest(ctx, http.MethodPost, endpoint, reqBody, &result); err != nil {
+			return nil, fmt.Errorf("fetch epics (cloud): %w", err)
+		}
+
+		newKeys := 0
+		for _, issue := range result.Issues {
+			if seen[issue.Key] {
+				continue
+			}
+			seen[issue.Key] = true
+			newKeys++
+
+			epic := Epic{Key: issue.Key}
+			if s, ok := issue.Fields["summary"].(string); ok {
+				epic.Summary = s
+			}
+			if status, ok := issue.Fields["status"].(map[string]any); ok {
+				if name, ok := status["name"].(string); ok {
+					epic.Status = name
+				}
+			}
+			epic.Description = cloudDescriptionText(issue.Fields["description"])
+
+			epics = append(epics, epic)
+		}
+
+		// Terminate on: last page, no next token, empty page, or no new keys
+		// (page-repeat guard). Never rely on a count — Cloud returns none.
+		if result.IsLast || result.NextPageToken == "" || len(result.Issues) == 0 || newKeys == 0 {
+			break
+		}
+		token = result.NextPageToken
+	}
+
+	return epics, nil
+}
+
+// cloudDescriptionText renders a Cloud issue's description field to plain text.
+// Cloud (v3) returns an ADF object (map[string]any), which is flattened via
+// adf.ADFToText; a plain string is returned unchanged; anything else yields "".
+func cloudDescriptionText(desc any) string {
+	switch d := desc.(type) {
+	case string:
+		return d
+	case map[string]any:
+		return adf.ADFToText(d)
+	default:
+		return ""
+	}
+}
+
+// User represents a Jira user as returned by the Cloud user-search endpoint.
+// AccountID is the Cloud account identifier sent as {"id": accountId} in issue
+// fields; EmailAddress and DisplayName are informational.
+type User struct {
+	AccountID    string `json:"accountId"`
+	EmailAddress string `json:"emailAddress"`
+	DisplayName  string `json:"displayName"`
+}
+
+// SearchUsers queries the Jira Cloud user-search endpoint for users matching the
+// given query (typically an email address) and returns the matching users. It
+// follows the client's standard retry/error conventions via doRequest; a non-2xx
+// response surfaces as a *APIError. This endpoint is Cloud-only (API v3); Data
+// Center callers must not call it.
+func (c *Client) SearchUsers(ctx context.Context, query string) ([]User, error) {
+	endpoint := fmt.Sprintf("/rest/api/%s/user/search", c.apiVersion)
+	params := url.Values{}
+	params.Set("query", query)
+	fullURL := endpoint + "?" + params.Encode()
+
+	var users []User
+	if err := c.doRequest(ctx, http.MethodGet, fullURL, nil, &users); err != nil {
+		return nil, fmt.Errorf("search users: %w", err)
+	}
+
+	return users, nil
 }
 
 // parseRetryAfter parses the Retry-After header (RFC 7231).

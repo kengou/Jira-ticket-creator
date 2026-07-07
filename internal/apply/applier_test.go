@@ -15,6 +15,7 @@ type mockClient struct {
 	createIssueFn     func(*jira.CreateIssueRequest) (*jira.CreateIssueResponse, error)
 	createIssueLinkFn func(*jira.IssueLinkRequest) error
 	fetchLinkTypesFn  func() ([]jira.IssueLinkTypeInfo, error)
+	searchUsersFn     func(string) ([]jira.User, error)
 }
 
 func (m *mockClient) CreateIssue(_ context.Context, r *jira.CreateIssueRequest) (*jira.CreateIssueResponse, error) {
@@ -27,6 +28,13 @@ func (m *mockClient) CreateIssueLink(_ context.Context, r *jira.IssueLinkRequest
 
 func (m *mockClient) FetchIssueLinkTypes(_ context.Context) ([]jira.IssueLinkTypeInfo, error) {
 	return m.fetchLinkTypesFn()
+}
+
+func (m *mockClient) SearchUsers(_ context.Context, query string) ([]jira.User, error) {
+	if m.searchUsersFn == nil {
+		return nil, nil
+	}
+	return m.searchUsersFn(query)
 }
 
 // --- BuildDependencyGraph ---
@@ -549,7 +557,7 @@ func TestBuildIssueFields_FullFields(t *testing.T) {
 		Summary:   "My story",
 	}
 
-	fields, err := a.buildIssueFields(issue)
+	fields, err := a.buildIssueFields(context.Background(), issue)
 	if err != nil {
 		t.Fatalf("buildIssueFields: %v", err)
 	}
@@ -653,7 +661,7 @@ func TestBuildIssueFields_ParentEpic_UsesEpicLink(t *testing.T) {
 		epicIDs: map[string]bool{"epic-1": true},
 	}
 
-	fields, err := a.buildIssueFields(&cfg.Issues[1])
+	fields, err := a.buildIssueFields(context.Background(), &cfg.Issues[1])
 	if err != nil {
 		t.Fatalf("buildIssueFields: %v", err)
 	}
@@ -691,7 +699,7 @@ func TestBuildIssueFields_ParentNonEpic_UsesParentField(t *testing.T) {
 		},
 	}
 
-	fields, err := a.buildIssueFields(&cfg.Issues[1])
+	fields, err := a.buildIssueFields(context.Background(), &cfg.Issues[1])
 	if err != nil {
 		t.Fatalf("buildIssueFields: %v", err)
 	}
@@ -728,7 +736,7 @@ func TestBuildIssueFields_ParentNotCreated(t *testing.T) {
 		createdIssues: make(map[string]string),
 	}
 
-	_, err := a.buildIssueFields(&cfg.Issues[1])
+	_, err := a.buildIssueFields(context.Background(), &cfg.Issues[1])
 	if err == nil {
 		t.Fatal("expected error for missing parent")
 	}
@@ -755,7 +763,7 @@ func TestBuildIssueFields_EpicWithEpicName(t *testing.T) {
 		EpicName:  "Epic Name",
 	}
 
-	fields, err := a.buildIssueFields(issue)
+	fields, err := a.buildIssueFields(context.Background(), issue)
 	if err != nil {
 		t.Fatalf("buildIssueFields: %v", err)
 	}
@@ -788,7 +796,7 @@ func TestBuildIssueFields_CustomEpicFieldIDs(t *testing.T) {
 		EpicName:  "Custom Epic Name",
 	}
 
-	fields, err := a.buildIssueFields(issue)
+	fields, err := a.buildIssueFields(context.Background(), issue)
 	if err != nil {
 		t.Fatalf("buildIssueFields: %v", err)
 	}
@@ -805,7 +813,7 @@ func TestBuildIssueFields_CustomEpicFieldIDs(t *testing.T) {
 		EpicLink:  "PROJ-100",
 	}
 
-	fields2, err := a.buildIssueFields(issue2)
+	fields2, err := a.buildIssueFields(context.Background(), issue2)
 	if err != nil {
 		t.Fatalf("buildIssueFields: %v", err)
 	}
@@ -845,7 +853,7 @@ func TestBuildIssueFields_CustomFieldsMerged(t *testing.T) {
 		},
 	}
 
-	fields, err := a.buildIssueFields(issue)
+	fields, err := a.buildIssueFields(context.Background(), issue)
 	if err != nil {
 		t.Fatalf("buildIssueFields: %v", err)
 	}
@@ -867,7 +875,7 @@ func TestNewApplier_SetsFields(t *testing.T) {
 		},
 	}
 
-	a := NewApplier(cfg, nil, true, true, "config.yaml")
+	a := NewApplier(cfg, nil, jira.ModeDataCenter, true, true, "config.yaml")
 
 	if !a.verbose {
 		t.Error("verbose should be true")
@@ -886,7 +894,7 @@ func TestNewApplier_SetsFields(t *testing.T) {
 func TestNewApplier_NilOptions(t *testing.T) {
 	cfg := &config.Config{}
 
-	a := NewApplier(cfg, nil, false, false, "config.yaml")
+	a := NewApplier(cfg, nil, jira.ModeDataCenter, false, false, "config.yaml")
 
 	if a.continueOnError {
 		t.Error("continueOnError should default to false")
@@ -936,7 +944,7 @@ func TestGetEpicLinkFieldID_Custom(t *testing.T) {
 func TestEpicIDs_ExplicitEpicType(t *testing.T) {
 	a := NewApplier(&config.Config{
 		Issues: []config.Issue{{ID: "epic-1", IssueType: "Epic"}},
-	}, nil, false, false, "config.yaml")
+	}, nil, jira.ModeDataCenter, false, false, "config.yaml")
 	if !a.epicIDs["epic-1"] {
 		t.Error("epicIDs should contain 'epic-1'")
 	}
@@ -945,7 +953,7 @@ func TestEpicIDs_ExplicitEpicType(t *testing.T) {
 func TestEpicIDs_CaseInsensitive(t *testing.T) {
 	a := NewApplier(&config.Config{
 		Issues: []config.Issue{{ID: "epic-1", IssueType: "epic"}},
-	}, nil, false, false, "config.yaml")
+	}, nil, jira.ModeDataCenter, false, false, "config.yaml")
 	if !a.epicIDs["epic-1"] {
 		t.Error("epicIDs should be case-insensitive for 'epic'")
 	}
@@ -955,7 +963,7 @@ func TestEpicIDs_DefaultIssueType(t *testing.T) {
 	a := NewApplier(&config.Config{
 		Defaults: config.Defaults{IssueType: "Epic"},
 		Issues:   []config.Issue{{ID: "epic-1"}}, // inherits default
-	}, nil, false, false, "config.yaml")
+	}, nil, jira.ModeDataCenter, false, false, "config.yaml")
 	if !a.epicIDs["epic-1"] {
 		t.Error("epicIDs should use default issue type")
 	}
@@ -964,7 +972,7 @@ func TestEpicIDs_DefaultIssueType(t *testing.T) {
 func TestEpicIDs_NonEpicType(t *testing.T) {
 	a := NewApplier(&config.Config{
 		Issues: []config.Issue{{ID: "story-1", IssueType: "Story"}},
-	}, nil, false, false, "config.yaml")
+	}, nil, jira.ModeDataCenter, false, false, "config.yaml")
 	if a.epicIDs["story-1"] {
 		t.Error("epicIDs should not contain Story type")
 	}
@@ -973,14 +981,14 @@ func TestEpicIDs_NonEpicType(t *testing.T) {
 func TestEpicIDs_UnknownID(t *testing.T) {
 	a := NewApplier(&config.Config{
 		Issues: []config.Issue{{ID: "epic-1", IssueType: "Epic"}},
-	}, nil, false, false, "config.yaml")
+	}, nil, jira.ModeDataCenter, false, false, "config.yaml")
 	if a.epicIDs["nonexistent"] {
 		t.Error("epicIDs should not contain unknown ID")
 	}
 }
 
 func TestEpicIDs_EmptyConfig(t *testing.T) {
-	a := NewApplier(&config.Config{}, nil, false, false, "config.yaml")
+	a := NewApplier(&config.Config{}, nil, jira.ModeDataCenter, false, false, "config.yaml")
 	if a.epicIDs["anything"] {
 		t.Error("epicIDs should be empty for empty config")
 	}
@@ -1242,6 +1250,393 @@ func TestCreateIssueLinks_MultipleErrors(t *testing.T) {
 	}
 }
 
+// --- buildIssueFields: Cloud epic translation ---
+
+func TestBuildIssueFields_Cloud_EpicLink_UsesParentField(t *testing.T) {
+	cfg := &config.Config{
+		Defaults: config.Defaults{ProjectKey: "PROJ"},
+		Options:  &config.Options{},
+	}
+	a := &Applier{
+		config:        cfg,
+		mode:          jira.ModeCloud,
+		enc:           newFieldEncoder(jira.ModeCloud),
+		createdIssues: make(map[string]string),
+	}
+
+	issue := &config.Issue{ID: "story-1", IssueType: "Story", Summary: "Story", EpicLink: "PROJ-100"}
+
+	fields, err := a.buildIssueFields(context.Background(), issue)
+	if err != nil {
+		t.Fatalf("buildIssueFields: %v", err)
+	}
+
+	parent, ok := fields["parent"].(map[string]any)
+	if !ok {
+		t.Fatalf("Cloud epicLink should set parent field, got %v (%T)", fields["parent"], fields["parent"])
+	}
+	if parent["key"] != "PROJ-100" {
+		t.Errorf("parent.key = %v, want PROJ-100", parent["key"])
+	}
+	if _, ok := fields["customfield_10009"]; ok {
+		t.Error("Cloud: epic-link custom field customfield_10009 must NOT be set")
+	}
+}
+
+// TestBuildIssueFields_Cloud_EpicLink_InternalID_ResolvesToCreatedKey pins the
+// Cloud internal-ID lookup path: an EpicLink referencing an internal ID present
+// in createdIssues must resolve to the created Jira key on the parent field.
+// (TestBuildIssueFields_Cloud_EpicLink_UsesParentField above only exercises the
+// raw-key fallback where EpicLink is already a Jira key.)
+func TestBuildIssueFields_Cloud_EpicLink_InternalID_ResolvesToCreatedKey(t *testing.T) {
+	cfg := &config.Config{
+		Defaults: config.Defaults{ProjectKey: "PROJ"},
+		Options:  &config.Options{},
+	}
+	a := &Applier{
+		config:        cfg,
+		mode:          jira.ModeCloud,
+		enc:           newFieldEncoder(jira.ModeCloud),
+		createdIssues: map[string]string{"epic-1": "PROJ-100"},
+	}
+
+	issue := &config.Issue{ID: "story-1", IssueType: "Story", Summary: "Story", EpicLink: "epic-1"}
+
+	fields, err := a.buildIssueFields(context.Background(), issue)
+	if err != nil {
+		t.Fatalf("buildIssueFields: %v", err)
+	}
+
+	parent, ok := fields["parent"].(map[string]any)
+	if !ok {
+		t.Fatalf("Cloud epicLink should set parent field, got %v (%T)", fields["parent"], fields["parent"])
+	}
+	if parent["key"] != "PROJ-100" {
+		t.Errorf("parent.key = %v, want PROJ-100 (internal ID epic-1 resolved to created key)", parent["key"])
+	}
+}
+
+func TestBuildIssueFields_Cloud_EpicParent_UsesParentField(t *testing.T) {
+	cfg := &config.Config{
+		Defaults: config.Defaults{ProjectKey: "PROJ", IssueType: "Story"},
+		Options:  &config.Options{},
+		Issues: []config.Issue{
+			{ID: "epic-1", IssueType: "Epic", Summary: "My Epic"},
+			{ID: "story-1", IssueType: "Story", Summary: "Story under epic", Parent: "epic-1"},
+		},
+	}
+	a := &Applier{
+		config:        cfg,
+		mode:          jira.ModeCloud,
+		enc:           newFieldEncoder(jira.ModeCloud),
+		createdIssues: map[string]string{"epic-1": "PROJ-100"},
+		epicIDs:       map[string]bool{"epic-1": true},
+	}
+
+	fields, err := a.buildIssueFields(context.Background(), &cfg.Issues[1])
+	if err != nil {
+		t.Fatalf("buildIssueFields: %v", err)
+	}
+
+	parent, ok := fields["parent"].(map[string]any)
+	if !ok {
+		t.Fatalf("Cloud epic parent should set parent field, got %v (%T)", fields["parent"], fields["parent"])
+	}
+	if parent["key"] != "PROJ-100" {
+		t.Errorf("parent.key = %v, want PROJ-100", parent["key"])
+	}
+	if _, ok := fields["customfield_10009"]; ok {
+		t.Error("Cloud: epic-link custom field customfield_10009 must NOT be set for epic parent")
+	}
+}
+
+func TestBuildIssueFields_Cloud_EpicName_DroppedAndRecorded(t *testing.T) {
+	cfg := &config.Config{
+		Defaults: config.Defaults{ProjectKey: "PROJ", IssueType: "Epic"},
+		Options:  &config.Options{},
+	}
+	a := &Applier{
+		config:        cfg,
+		mode:          jira.ModeCloud,
+		enc:           newFieldEncoder(jira.ModeCloud),
+		verbose:       true,
+		createdIssues: make(map[string]string),
+	}
+
+	issue := &config.Issue{ID: "epic-1", IssueType: "Epic", Summary: "My Epic", EpicName: "Epic Display Name"}
+
+	fields, err := a.buildIssueFields(context.Background(), issue)
+	if err != nil {
+		t.Fatalf("buildIssueFields: %v", err)
+	}
+
+	if _, ok := fields["customfield_10011"]; ok {
+		t.Error("Cloud: epic-name custom field customfield_10011 must NOT be set")
+	}
+	if len(a.droppedEpicNames) != 1 || a.droppedEpicNames[0] != "epic-1" {
+		t.Errorf("droppedEpicNames = %v, want [epic-1]", a.droppedEpicNames)
+	}
+}
+
+func TestBuildIssueFields_Cloud_CustomEpicFieldIDs_Ignored(t *testing.T) {
+	cfg := &config.Config{
+		Defaults: config.Defaults{
+			ProjectKey:    "PROJ",
+			EpicNameField: "customfield_77777",
+			EpicLinkField: "customfield_88888",
+		},
+		Options: &config.Options{},
+	}
+	a := &Applier{
+		config:        cfg,
+		mode:          jira.ModeCloud,
+		enc:           newFieldEncoder(jira.ModeCloud),
+		createdIssues: make(map[string]string),
+	}
+
+	epic := &config.Issue{ID: "epic-1", IssueType: "Epic", Summary: "Epic", EpicName: "Name"}
+	epicFields, err := a.buildIssueFields(context.Background(), epic)
+	if err != nil {
+		t.Fatalf("buildIssueFields epic: %v", err)
+	}
+	if _, ok := epicFields["customfield_77777"]; ok {
+		t.Error("Cloud: custom epic-name field customfield_77777 must NOT appear")
+	}
+
+	story := &config.Issue{ID: "story-1", IssueType: "Story", Summary: "Story", EpicLink: "PROJ-100"}
+	storyFields, err := a.buildIssueFields(context.Background(), story)
+	if err != nil {
+		t.Fatalf("buildIssueFields story: %v", err)
+	}
+	if _, ok := storyFields["customfield_88888"]; ok {
+		t.Error("Cloud: custom epic-link field customfield_88888 must NOT appear")
+	}
+	parent, ok := storyFields["parent"].(map[string]any)
+	if !ok || parent["key"] != "PROJ-100" {
+		t.Errorf("Cloud epicLink should route to parent {key: PROJ-100}, got %v", storyFields["parent"])
+	}
+}
+
+func TestBuildIssueFields_Cloud_NonEpicParent_StillUsesParentField(t *testing.T) {
+	cfg := &config.Config{
+		Defaults: config.Defaults{ProjectKey: "PROJ", IssueType: "Task"},
+		Options:  &config.Options{},
+		Issues: []config.Issue{
+			{ID: "task-1", IssueType: "Task", Summary: "Parent Task"},
+			{ID: "subtask-1", IssueType: "Sub-task", Summary: "Sub-task", Parent: "task-1"},
+		},
+	}
+	a := &Applier{
+		config:        cfg,
+		mode:          jira.ModeCloud,
+		enc:           newFieldEncoder(jira.ModeCloud),
+		createdIssues: map[string]string{"task-1": "PROJ-200"},
+	}
+
+	fields, err := a.buildIssueFields(context.Background(), &cfg.Issues[1])
+	if err != nil {
+		t.Fatalf("buildIssueFields: %v", err)
+	}
+	parent, ok := fields["parent"].(map[string]any)
+	if !ok {
+		t.Fatal("Cloud: non-epic parent should still set parent field")
+	}
+	if parent["key"] != "PROJ-200" {
+		t.Errorf("parent.key = %v, want PROJ-200", parent["key"])
+	}
+}
+
+// --- resolveUserField / assignee-reporter resolution ---
+
+// stubSearchUsers records queries and returns canned results, so cache and
+// error-path tests can drive resolveUserField deterministically.
+type stubSearchUsers struct {
+	results map[string][]jira.User // query -> matches
+	calls   map[string]int         // query -> number of SearchUsers calls
+}
+
+func newStubSearchUsers(results map[string][]jira.User) *stubSearchUsers {
+	return &stubSearchUsers{results: results, calls: make(map[string]int)}
+}
+
+func (s *stubSearchUsers) CreateIssue(_ context.Context, _ *jira.CreateIssueRequest) (*jira.CreateIssueResponse, error) {
+	return &jira.CreateIssueResponse{Key: "TEST-1"}, nil
+}
+func (s *stubSearchUsers) CreateIssueLink(_ context.Context, _ *jira.IssueLinkRequest) error {
+	return nil
+}
+func (s *stubSearchUsers) FetchIssueLinkTypes(_ context.Context) ([]jira.IssueLinkTypeInfo, error) {
+	return nil, nil
+}
+func (s *stubSearchUsers) SearchUsers(_ context.Context, query string) ([]jira.User, error) {
+	s.calls[query]++
+	return s.results[query], nil
+}
+
+func newCloudApplier(client JiraClient) *Applier {
+	return &Applier{
+		config:        &config.Config{Defaults: config.Defaults{ProjectKey: "PROJ"}, Options: &config.Options{}},
+		client:        client,
+		mode:          jira.ModeCloud,
+		enc:           newFieldEncoder(jira.ModeCloud),
+		createdIssues: make(map[string]string),
+		userCache:     make(map[string]string),
+	}
+}
+
+func TestResolveUserField_DataCenter_UsesNameNoLookup(t *testing.T) {
+	stub := newStubSearchUsers(nil)
+	a := &Applier{
+		config:        &config.Config{Defaults: config.Defaults{ProjectKey: "PROJ"}, Options: &config.Options{}},
+		client:        stub,
+		mode:          jira.ModeDataCenter,
+		enc:           newFieldEncoder(jira.ModeDataCenter),
+		createdIssues: make(map[string]string),
+		userCache:     make(map[string]string),
+	}
+	got, err := a.resolveUserField(context.Background(), "jdoe@example.com")
+	if err != nil {
+		t.Fatalf("resolveUserField: %v", err)
+	}
+	if got["name"] != "jdoe@example.com" {
+		t.Errorf("DC field = %v, want {\"name\":\"jdoe@example.com\"}", got)
+	}
+	if _, ok := got["id"]; ok {
+		t.Error("DC field must NOT carry an id")
+	}
+	if len(stub.calls) != 0 {
+		t.Errorf("DC must not call SearchUsers; calls = %v", stub.calls)
+	}
+}
+
+func TestResolveUserField_Cloud_EmailResolvedToID(t *testing.T) {
+	stub := newStubSearchUsers(map[string][]jira.User{
+		"alice@example.com": {{AccountID: "acc-alice"}},
+	})
+	a := newCloudApplier(stub)
+	got, err := a.resolveUserField(context.Background(), "alice@example.com")
+	if err != nil {
+		t.Fatalf("resolveUserField: %v", err)
+	}
+	if got["id"] != "acc-alice" {
+		t.Errorf("Cloud field = %v, want {\"id\":\"acc-alice\"}", got)
+	}
+	if _, ok := got["name"]; ok {
+		t.Error("Cloud field must NOT carry a name")
+	}
+}
+
+func TestResolveUserField_Cloud_AccountIDPassthroughNoLookup(t *testing.T) {
+	stub := newStubSearchUsers(nil)
+	a := newCloudApplier(stub)
+	got, err := a.resolveUserField(context.Background(), "5b10ac8d82e05b22cc7d4ef5")
+	if err != nil {
+		t.Fatalf("resolveUserField: %v", err)
+	}
+	if got["id"] != "5b10ac8d82e05b22cc7d4ef5" {
+		t.Errorf("Cloud field = %v, want {\"id\":\"5b10ac8d82e05b22cc7d4ef5\"}", got)
+	}
+	if len(stub.calls) != 0 {
+		t.Errorf("account-ID passthrough must not call SearchUsers; calls = %v", stub.calls)
+	}
+}
+
+func TestResolveUserField_Cloud_CachesLookup(t *testing.T) {
+	stub := newStubSearchUsers(map[string][]jira.User{
+		"bob@example.com": {{AccountID: "acc-bob"}},
+	})
+	a := newCloudApplier(stub)
+	for i := 0; i < 3; i++ {
+		got, err := a.resolveUserField(context.Background(), "bob@example.com")
+		if err != nil {
+			t.Fatalf("resolveUserField (iter %d): %v", i, err)
+		}
+		if got["id"] != "acc-bob" {
+			t.Errorf("iter %d: id = %v, want acc-bob", i, got["id"])
+		}
+	}
+	if stub.calls["bob@example.com"] != 1 {
+		t.Errorf("SearchUsers called %d times, want 1 (per-run cache)", stub.calls["bob@example.com"])
+	}
+}
+
+func TestResolveUserField_Cloud_NotFound(t *testing.T) {
+	stub := newStubSearchUsers(map[string][]jira.User{}) // no matches for any query
+	a := newCloudApplier(stub)
+	_, err := a.resolveUserField(context.Background(), "ghost@example.com")
+	if err == nil {
+		t.Fatal("expected an error for a zero-match email")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "ghost@example.com") {
+		t.Errorf("error %q should name the value", msg)
+	}
+	if !strings.Contains(strings.ToLower(msg), "not found") {
+		t.Errorf("error %q should state 'not found'", msg)
+	}
+}
+
+func TestResolveUserField_Cloud_Ambiguous(t *testing.T) {
+	stub := newStubSearchUsers(map[string][]jira.User{
+		"dup@example.com": {{AccountID: "acc-1"}, {AccountID: "acc-2"}},
+	})
+	a := newCloudApplier(stub)
+	_, err := a.resolveUserField(context.Background(), "dup@example.com")
+	if err == nil {
+		t.Fatal("expected an error for a multi-match email")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "dup@example.com") {
+		t.Errorf("error %q should name the value", msg)
+	}
+	if !strings.Contains(strings.ToLower(msg), "ambiguous") {
+		t.Errorf("error %q should state 'ambiguous'", msg)
+	}
+}
+
+func TestResolveUserField_Cloud_DryRunNoLookup(t *testing.T) {
+	stub := newStubSearchUsers(map[string][]jira.User{
+		"alice@example.com": {{AccountID: "acc-alice"}},
+	})
+	a := newCloudApplier(stub)
+	a.dryRun = true
+	got, err := a.resolveUserField(context.Background(), "alice@example.com")
+	if err != nil {
+		t.Fatalf("resolveUserField (dry-run): %v", err)
+	}
+	if len(stub.calls) != 0 {
+		t.Errorf("dry-run must not call SearchUsers; calls = %v", stub.calls)
+	}
+	// Dry-run still emits a plausible id-shaped field so field summaries render.
+	if _, ok := got["id"]; !ok {
+		t.Errorf("dry-run Cloud field should be id-shaped, got %v", got)
+	}
+}
+
+func TestBuildIssueFields_Cloud_RoutesAssigneeAndReporterThroughResolution(t *testing.T) {
+	stub := newStubSearchUsers(map[string][]jira.User{
+		"alice@example.com": {{AccountID: "acc-alice"}},
+		"bob@example.com":   {{AccountID: "acc-bob"}},
+	})
+	a := newCloudApplier(stub)
+	issue := &config.Issue{
+		ID: "s1", IssueType: "Story", Summary: "Story",
+		Assignee: "alice@example.com", Reporter: "bob@example.com",
+	}
+	fields, err := a.buildIssueFields(context.Background(), issue)
+	if err != nil {
+		t.Fatalf("buildIssueFields: %v", err)
+	}
+	assignee, ok := fields["assignee"].(map[string]any)
+	if !ok || assignee["id"] != "acc-alice" {
+		t.Errorf("assignee = %v, want {\"id\":\"acc-alice\"}", fields["assignee"])
+	}
+	reporter, ok := fields["reporter"].(map[string]any)
+	if !ok || reporter["id"] != "acc-bob" {
+		t.Errorf("reporter = %v, want {\"id\":\"acc-bob\"}", fields["reporter"])
+	}
+}
+
 // --- helpers ---
 
 func indexOf(issues []config.Issue, id string) int {
@@ -1251,4 +1646,51 @@ func indexOf(issues []config.Issue, id string) int {
 		}
 	}
 	return -1
+}
+
+// --- reporter permission rejection surfacing (Cloud) ---
+
+func TestApply_Cloud_ReporterPermissionRejection_SurfacesAPIError(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	var createAttempts int
+	reporterErr := &jira.APIError{
+		StatusCode: 400,
+		Body:       `{"errors":{"reporter":"Field 'reporter' cannot be set. It is not on the appropriate screen, or unknown."}}`,
+	}
+	client := &mockClient{
+		createIssueFn: func(_ *jira.CreateIssueRequest) (*jira.CreateIssueResponse, error) {
+			createAttempts++
+			return nil, reporterErr
+		},
+		searchUsersFn: func(query string) ([]jira.User, error) {
+			return []jira.User{{AccountID: "acc-" + query}}, nil
+		},
+	}
+
+	cfg := &config.Config{
+		Defaults: config.Defaults{ProjectKey: "PROJ"},
+		Options:  &config.Options{},
+		Issues: []config.Issue{
+			{ID: "s1", IssueType: "Story", Summary: "Story", Reporter: "someone@example.com"},
+		},
+	}
+	applier := NewApplier(cfg, client, jira.ModeCloud, false, false, "cfg.yaml")
+
+	err := applier.Apply(context.Background())
+	if err == nil {
+		t.Fatal("Apply should return the reporter rejection error (no continueOnError)")
+	}
+	// The raw APIError must be recoverable from the chain (recognizable surfacing).
+	var apiErr *jira.APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error = %v, want a *jira.APIError in the chain", err)
+	}
+	if !strings.Contains(apiErr.Body, "reporter") {
+		t.Errorf("surfaced APIError body %q should mention the reporter field", apiErr.Body)
+	}
+	// Exactly one create attempt: no automatic retry-without-reporter.
+	if createAttempts != 1 {
+		t.Errorf("createAttempts = %d, want 1 (no retry-without-reporter)", createAttempts)
+	}
 }

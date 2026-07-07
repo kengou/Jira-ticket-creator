@@ -9,6 +9,7 @@ tickets/
 docs/
 .archive/
 .claude/
+.beastmode/
 
 # IDE and Editor
 .idea/

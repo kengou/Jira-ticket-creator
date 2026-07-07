@@ -1,0 +1,179 @@
+{
+  "name": "jira-ai-creator-vscode",
+  "displayName": "Jira AI Creator",
+  "description": "Create Jira issues with AI assistance via @jira chat participant",
+  "version": "1.2.0",
+  "publisher": "kengou",
+  "author": {
+    "name": "kengou",
+    "url": "https://github.com/kengou"
+  },
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/kengou/jira-ticket-creator/tree/main/vscode-extension#readme",
+  "bugs": {
+    "url": "https://github.com/kengou/jira-ticket-creator/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kengou/jira-ticket-creator",
+    "directory": "vscode-extension"
+  },
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Chat",
+    "Other"
+  ],
+  "keywords": [
+    "jira",
+    "ai",
+    "chat",
+    "copilot",
+    "yaml",
+    "issues",
+    "tickets",
+    "project-management",
+    "devops"
+  ],
+  "preview": true,
+  "icon": "icon.png",
+  "galleryBanner": {
+    "color": "#1a73e8",
+    "theme": "dark"
+  },
+  "markdown": "github",
+  "qna": "https://github.com/kengou/jira-ticket-creator/issues",
+  "extensionDependencies": [
+    "github.copilot-chat"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onChatParticipant:jira-ai-creator.jira"
+  ],
+  "contributes": {
+    "chatParticipants": [
+      {
+        "id": "jira-ai-creator.jira",
+        "name": "jira",
+        "fullName": "Jira AI Creator",
+        "description": "Create and validate Jira issues from YAML configurations with AI assistance",
+        "isSticky": true,
+        "commands": [
+          {
+            "name": "validate",
+            "description": "Validate YAML configuration file"
+          },
+          {
+            "name": "plan",
+            "description": "Preview issue creation order (dry run)"
+          },
+          {
+            "name": "apply",
+            "description": "Create issues in Jira"
+          },
+          {
+            "name": "generate",
+            "description": "Generate YAML plan from a description"
+          },
+          {
+            "name": "epics",
+            "description": "List existing epics in a Jira project"
+          },
+          {
+            "name": "fields",
+            "description": "Search Jira field definitions"
+          },
+          {
+            "name": "linktypes",
+            "description": "List available issue link types"
+          }
+        ]
+      }
+    ],
+    "commands": [
+      {
+        "command": "jira-ai-creator.openFile",
+        "title": "Open Generated File",
+        "category": "Jira AI Creator"
+      },
+      {
+        "command": "jira-ai-creator.markReviewed",
+        "title": "Mark File as Reviewed",
+        "category": "Jira AI Creator"
+      },
+      {
+        "command": "jira-ai-creator.setJiraToken",
+        "title": "Set Jira Token",
+        "category": "Jira AI Creator"
+      },
+      {
+        "command": "jira-ai-creator.setAnthropicKey",
+        "title": "Set Anthropic API Key",
+        "category": "Jira AI Creator"
+      }
+    ],
+    "configuration": {
+      "title": "Jira AI Creator",
+      "properties": {
+        "jiraAiCreator.binaryPath": {
+          "type": "string",
+          "default": "",
+          "order": 1,
+          "markdownDescription": "Absolute path to the `jira-ai-creator` binary. Leave empty to auto-detect from `$PATH`."
+        },
+        "jiraAiCreator.jiraUrl": {
+          "type": "string",
+          "default": "",
+          "order": 2,
+          "markdownDescription": "Jira base URL (e.g. `https://jira.yourcompany.com`). Overrides `JIRA_URL` env var."
+        },
+        "jiraAiCreator.cloud": {
+          "type": "boolean",
+          "default": false,
+          "order": 3,
+          "markdownDescription": "Use Jira Cloud API (v3) instead of Data Center (v2). Enable this if your Jira instance is on `*.atlassian.net`."
+        },
+        "jiraAiCreator.aiProvider": {
+          "type": "string",
+          "enum": [
+            "",
+            "claude",
+            "copilot",
+            "opencode"
+          ],
+          "enumDescriptions": [
+            "Not configured — you will be prompted when using /generate",
+            "Anthropic Claude (requires ANTHROPIC_API_KEY or SecretStorage)",
+            "GitHub Copilot (requires @github/copilot CLI)",
+            "OpenCode local daemon"
+          ],
+          "default": "",
+          "order": 4,
+          "markdownDescription": "Default AI provider for YAML generation with `/generate`."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run lint && npm run typecheck && npm run build",
+    "build": "node esbuild.mjs --production",
+    "watch": "node esbuild.mjs --watch",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "package": "vsce package",
+    "release:patch": "npm version patch --no-git-tag-version && npm run package",
+    "release:minor": "npm version minor --no-git-tag-version && npm run package",
+    "release:major": "npm version major --no-git-tag-version && npm run package"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.100.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.25.0",
+    "eslint": "^10.5.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.61.1"
+  }
+}

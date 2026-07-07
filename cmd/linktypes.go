@@ -70,7 +70,7 @@ func matchLinkTypes(types []jira.IssueLinkTypeInfo, search string) []jira.IssueL
 func runLinkTypes() error {
 	fmt.Printf("Fetching issue link types from %s...\n\n", jiraURL)
 
-	client, err := jira.NewClient(jiraURL, jiraToken, isCloud)
+	client, err := newJiraClient()
 	if err != nil {
 		return fmt.Errorf("create Jira client: %w", err)
 	}

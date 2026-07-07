@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -57,7 +59,10 @@ func TestNewClient_DataCenter(t *testing.T) {
 }
 
 func TestNewClient_Cloud(t *testing.T) {
-	c := mustNewClient(t, "https://jira.atlassian.net", "my-token", true)
+	c, err := NewClientWithMode("https://jira.atlassian.net", ModeCloud, Credentials{Email: "user@example.com", Token: "my-token"})
+	if err != nil {
+		t.Fatalf("NewClientWithMode: %v", err)
+	}
 	if c.apiVersion != "3" {
 		t.Errorf("apiVersion = %q, want %q for Cloud", c.apiVersion, "3")
 	}
@@ -280,6 +285,7 @@ func TestNormalizeURL_HTTPSToHTTPRedirectBlocked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
+	c.MaxRetries = 0
 	// Save the production CheckRedirect before replacing the HTTP client
 	originalCheckRedirect := c.httpClient.CheckRedirect
 	// Replace the HTTP client with one that trusts the test TLS cert
@@ -635,7 +641,10 @@ func TestCreateIssue_CloudUsesAPIv3(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := mustNewClient(t, server.URL, "token", true) // isCloud=true
+	c, err := NewClientWithMode(server.URL, ModeCloud, Credentials{Email: "user@example.com", Token: "token"})
+	if err != nil {
+		t.Fatalf("NewClientWithMode: %v", err)
+	}
 	c.MaxRetries = 0
 
 	resp, err := c.CreateIssue(context.Background(), &CreateIssueRequest{Fields: map[string]any{"summary": "cloud test"}})
@@ -691,6 +700,35 @@ func BenchmarkParseRetryAfter_HTTPDate(b *testing.B) {
 	future := time.Now().Add(30 * time.Second).UTC().Format(time.RFC1123)
 	for b.Loop() {
 		c.parseRetryAfter(future)
+	}
+}
+
+// --- jqlQuote ---
+
+func TestJQLQuote_Plain(t *testing.T) {
+	if got := jqlQuote("PROJ"); got != `"PROJ"` {
+		t.Errorf("jqlQuote(%q) = %q, want %q", "PROJ", got, `"PROJ"`)
+	}
+}
+
+func TestJQLQuote_EmbeddedQuote(t *testing.T) {
+	// A double-quote inside the value must be escaped with a backslash.
+	if got := jqlQuote(`a"b`); got != `"a\"b"` {
+		t.Errorf("jqlQuote(%q) = %q, want %q", `a"b`, got, `"a\"b"`)
+	}
+}
+
+func TestJQLQuote_Backslash(t *testing.T) {
+	// A backslash inside the value must be doubled.
+	if got := jqlQuote(`a\b`); got != `"a\\b"` {
+		t.Errorf("jqlQuote(%q) = %q, want %q", `a\b`, got, `"a\\b"`)
+	}
+}
+
+func TestJQLQuote_BackslashAndQuote(t *testing.T) {
+	// Combined: backslash then quote → \\ then \"
+	if got := jqlQuote(`a\"b`); got != `"a\\\"b"` {
+		t.Errorf("jqlQuote(%q) = %q, want %q", `a\"b`, got, `"a\\\"b"`)
 	}
 }
 
@@ -1035,22 +1073,24 @@ func TestFetchEpics_MissingStatusField(t *testing.T) {
 func TestFetchEpics_CloudUsesV3(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !testing.Short() {
-			// Verify path uses v3
-			expectedPrefix := "/rest/api/3/search"
-			if r.URL.Path != expectedPrefix {
-				t.Errorf("path = %q, want %q (Cloud v3)", r.URL.Path, expectedPrefix)
+			// Verify path uses v3 search/jql (Cloud endpoint, not legacy /search)
+			expectedPath := "/rest/api/3/search/jql"
+			if r.URL.Path != expectedPath {
+				t.Errorf("path = %q, want %q (Cloud v3 search/jql endpoint)", r.URL.Path, expectedPath)
 			}
 		}
 		w.WriteHeader(http.StatusOK)
-		encodeJSON(t, w, SearchResult{Total: 0, Issues: nil})
+		writeBytes(t, w, []byte(`{"issues":[],"isLast":true}`))
 	}))
 	defer server.Close()
 
-	c := mustNewClient(t, server.URL, "token", true) // isCloud=true
+	c, err := NewClientWithMode(server.URL, ModeCloud, Credentials{Email: "user@example.com", Token: "token"})
+	if err != nil {
+		t.Fatalf("NewClientWithMode: %v", err)
+	}
 	c.MaxRetries = 0
 
-	_, err := c.FetchEpics(context.Background(), "PROJ", "")
-	if err != nil {
+	if _, err := c.FetchEpics(context.Background(), "PROJ", ""); err != nil {
 		t.Fatalf("FetchEpics: %v", err)
 	}
 }
@@ -1180,11 +1220,13 @@ func TestFetchFields_CloudUsesV3(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := mustNewClient(t, server.URL, "token", true) // isCloud=true
+	c, err := NewClientWithMode(server.URL, ModeCloud, Credentials{Email: "user@example.com", Token: "token"})
+	if err != nil {
+		t.Fatalf("NewClientWithMode: %v", err)
+	}
 	c.MaxRetries = 0
 
-	_, err := c.FetchFields(context.Background())
-	if err != nil {
+	if _, err := c.FetchFields(context.Background()); err != nil {
 		t.Fatalf("FetchFields: %v", err)
 	}
 }
@@ -1290,9 +1332,337 @@ func TestFetchIssueLinkTypes_CloudUsesV3(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	c := mustNewClient(t, ts.URL, "tok", true) // isCloud = true
-	_, err := c.FetchIssueLinkTypes(context.Background())
+	c, err := NewClientWithMode(ts.URL, ModeCloud, Credentials{Email: "user@example.com", Token: "tok"})
+	if err != nil {
+		t.Fatalf("NewClientWithMode: %v", err)
+	}
+	_, err = c.FetchIssueLinkTypes(context.Background())
 	if err != nil {
 		t.Fatalf("FetchIssueLinkTypes: %v", err)
+	}
+}
+
+// --- SearchUsers (Cloud user-search endpoint) ---
+
+func TestSearchUsers_QueriesUserSearchEndpoint(t *testing.T) {
+	var gotPath, gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.Query().Get("query")
+		w.WriteHeader(http.StatusOK)
+		writeBytes(t, w, []byte(`[{"accountId":"acc-1","emailAddress":"a@x.com","displayName":"Alice"}]`))
+	}))
+	defer srv.Close()
+
+	c, err := NewClientWithMode(srv.URL, ModeCloud, Credentials{Email: "e@x.com", Token: "tok"})
+	if err != nil {
+		t.Fatalf("NewClientWithMode: %v", err)
+	}
+
+	users, err := c.SearchUsers(context.Background(), "a@x.com")
+	if err != nil {
+		t.Fatalf("SearchUsers: %v", err)
+	}
+	if gotPath != "/rest/api/3/user/search" {
+		t.Errorf("path = %q, want /rest/api/3/user/search", gotPath)
+	}
+	if gotQuery != "a@x.com" {
+		t.Errorf("query = %q, want a@x.com", gotQuery)
+	}
+	if len(users) != 1 {
+		t.Fatalf("len(users) = %d, want 1", len(users))
+	}
+	if users[0].AccountID != "acc-1" {
+		t.Errorf("AccountID = %q, want acc-1", users[0].AccountID)
+	}
+	if users[0].EmailAddress != "a@x.com" {
+		t.Errorf("EmailAddress = %q, want a@x.com", users[0].EmailAddress)
+	}
+}
+
+func TestSearchUsers_ZeroMatches(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		writeBytes(t, w, []byte(`[]`))
+	}))
+	defer srv.Close()
+
+	c, err := NewClientWithMode(srv.URL, ModeCloud, Credentials{Email: "e@x.com", Token: "tok"})
+	if err != nil {
+		t.Fatalf("NewClientWithMode: %v", err)
+	}
+
+	users, err := c.SearchUsers(context.Background(), "ghost@x.com")
+	if err != nil {
+		t.Fatalf("SearchUsers: %v", err)
+	}
+	if len(users) != 0 {
+		t.Errorf("len(users) = %d, want 0", len(users))
+	}
+}
+
+func TestSearchUsers_MultipleMatches(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		writeBytes(t, w, []byte(`[{"accountId":"acc-1"},{"accountId":"acc-2"}]`))
+	}))
+	defer srv.Close()
+
+	c, err := NewClientWithMode(srv.URL, ModeCloud, Credentials{Email: "e@x.com", Token: "tok"})
+	if err != nil {
+		t.Fatalf("NewClientWithMode: %v", err)
+	}
+
+	users, err := c.SearchUsers(context.Background(), "dup@x.com")
+	if err != nil {
+		t.Fatalf("SearchUsers: %v", err)
+	}
+	if len(users) != 2 {
+		t.Fatalf("len(users) = %d, want 2", len(users))
+	}
+	if users[0].AccountID != "acc-1" || users[1].AccountID != "acc-2" {
+		t.Errorf("account IDs = [%q %q], want [acc-1 acc-2]", users[0].AccountID, users[1].AccountID)
+	}
+}
+
+func TestSearchUsers_APIErrorPropagates(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		writeBytes(t, w, []byte(`{"errorMessages":["no permission"]}`))
+	}))
+	defer srv.Close()
+
+	c, err := NewClientWithMode(srv.URL, ModeCloud, Credentials{Email: "e@x.com", Token: "tok"})
+	if err != nil {
+		t.Fatalf("NewClientWithMode: %v", err)
+	}
+
+	_, err = c.SearchUsers(context.Background(), "a@x.com")
+	if err == nil {
+		t.Fatal("SearchUsers should return an error on a 403 response")
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("error = %v, want a *APIError in the chain", err)
+	}
+	if apiErr.StatusCode != http.StatusForbidden {
+		t.Errorf("StatusCode = %d, want 403", apiErr.StatusCode)
+	}
+}
+
+// --- FetchEpics: Cloud search/jql path ---
+
+// cloudPageServer serves an ordered sequence of raw JSON page bodies from the
+// Cloud search/jql endpoint, advancing by the incoming nextPageToken. It also
+// records the JQL of the first request so tests can assert JQL equivalence.
+func cloudPageServer(t *testing.T, pages []string, gotJQL *string) *httptest.Server {
+	t.Helper()
+	first := true
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/search/jql") {
+			t.Errorf("Cloud must call /search/jql, got %q", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var body struct {
+			JQL           string `json:"jql"`
+			NextPageToken string `json:"nextPageToken"`
+		}
+		if r.Body != nil {
+			raw, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Errorf("read search/jql body: %v", err)
+			}
+			if len(raw) > 0 {
+				if err := json.Unmarshal(raw, &body); err != nil {
+					t.Errorf("unmarshal search/jql body: %v", err)
+				}
+			}
+		}
+		if first && gotJQL != nil {
+			*gotJQL = body.JQL
+			first = false
+		}
+		idx := 0
+		switch body.NextPageToken {
+		case "":
+			idx = 0
+		case "tok-1":
+			idx = 1
+		case "tok-2":
+			idx = 2
+		default:
+			t.Errorf("unexpected nextPageToken %q", body.NextPageToken)
+		}
+		if idx >= len(pages) {
+			t.Errorf("no page for token %q", body.NextPageToken)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		writeBytes(t, w, []byte(pages[idx]))
+	}))
+}
+
+func newCloudClient(t *testing.T, url string) *Client {
+	t.Helper()
+	c, err := NewClientWithMode(url, ModeCloud, Credentials{Email: "e@x.com", Token: "tok"})
+	if err != nil {
+		t.Fatalf("NewClientWithMode Cloud: %v", err)
+	}
+	c.MaxRetries = 0
+	return c
+}
+
+func TestFetchEpics_Cloud_MultiPage_NextPageToken(t *testing.T) {
+	pages := []string{
+		`{"issues":[{"key":"PROJ-1","fields":{"summary":"E1","status":{"name":"To Do"}}}],"nextPageToken":"tok-1","isLast":false}`,
+		`{"issues":[{"key":"PROJ-2","fields":{"summary":"E2","status":{"name":"Done"}}}],"isLast":true}`,
+	}
+	server := cloudPageServer(t, pages, nil)
+	defer server.Close()
+
+	epics, err := newCloudClient(t, server.URL).FetchEpics(context.Background(), "PROJ", "")
+	if err != nil {
+		t.Fatalf("FetchEpics: %v", err)
+	}
+	if len(epics) != 2 {
+		t.Fatalf("len(epics) = %d, want 2 (%v)", len(epics), epics)
+	}
+	if epics[0].Key != "PROJ-1" || epics[1].Key != "PROJ-2" {
+		t.Errorf("keys = %q,%q want PROJ-1,PROJ-2", epics[0].Key, epics[1].Key)
+	}
+	if epics[0].Summary != "E1" || epics[1].Status != "Done" {
+		t.Errorf("epics = %+v", epics)
+	}
+}
+
+func TestFetchEpics_Cloud_TerminatesOnIsLastWithToken(t *testing.T) {
+	// isLast=true MUST terminate even though a nextPageToken is still present.
+	// If the loop followed the token it would request tok-1 (no such page) and
+	// the server would 500.
+	pages := []string{
+		`{"issues":[{"key":"PROJ-1","fields":{"summary":"E1","status":{"name":"To Do"}}}],"nextPageToken":"tok-1","isLast":true}`,
+	}
+	server := cloudPageServer(t, pages, nil)
+	defer server.Close()
+
+	epics, err := newCloudClient(t, server.URL).FetchEpics(context.Background(), "PROJ", "")
+	if err != nil {
+		t.Fatalf("FetchEpics: %v", err)
+	}
+	if len(epics) != 1 || epics[0].Key != "PROJ-1" {
+		t.Fatalf("epics = %v, want exactly [PROJ-1]", epics)
+	}
+}
+
+func TestFetchEpics_Cloud_TerminatesOnEmptyPage(t *testing.T) {
+	// A page with a token but zero issues MUST terminate (no count to rely on).
+	pages := []string{
+		`{"issues":[{"key":"PROJ-1","fields":{"summary":"E1","status":{"name":"To Do"}}}],"nextPageToken":"tok-1","isLast":false}`,
+		`{"issues":[],"nextPageToken":"tok-2","isLast":false}`,
+	}
+	server := cloudPageServer(t, pages, nil)
+	defer server.Close()
+
+	epics, err := newCloudClient(t, server.URL).FetchEpics(context.Background(), "PROJ", "")
+	if err != nil {
+		t.Fatalf("FetchEpics: %v", err)
+	}
+	if len(epics) != 1 || epics[0].Key != "PROJ-1" {
+		t.Fatalf("epics = %v, want exactly [PROJ-1]", epics)
+	}
+}
+
+func TestFetchEpics_Cloud_TerminatesOnRepeatedPage(t *testing.T) {
+	// Endpoint quirk guard: the second page repeats the first page's issue key and
+	// keeps handing back a token. Without a seen-key guard this loops forever;
+	// with it, the loop terminates and the repeated epic is NOT double-counted.
+	pages := []string{
+		`{"issues":[{"key":"PROJ-1","fields":{"summary":"E1","status":{"name":"To Do"}}}],"nextPageToken":"tok-1","isLast":false}`,
+		`{"issues":[{"key":"PROJ-1","fields":{"summary":"E1","status":{"name":"To Do"}}}],"nextPageToken":"tok-2","isLast":false}`,
+	}
+	server := cloudPageServer(t, pages, nil)
+	defer server.Close()
+
+	epics, err := newCloudClient(t, server.URL).FetchEpics(context.Background(), "PROJ", "")
+	if err != nil {
+		t.Fatalf("FetchEpics: %v", err)
+	}
+	if len(epics) != 1 || epics[0].Key != "PROJ-1" {
+		t.Fatalf("epics = %v, want exactly [PROJ-1] (no duplicates, loop terminated)", epics)
+	}
+}
+
+func TestFetchEpics_Cloud_ADFDescriptionFlattened(t *testing.T) {
+	pages := []string{
+		`{"issues":[{"key":"PROJ-1","fields":{
+			"summary":"Rich","status":{"name":"To Do"},
+			"description":{"version":1,"type":"doc","content":[
+				{"type":"paragraph","content":[
+					{"type":"text","text":"Hello "},
+					{"type":"text","text":"world","marks":[{"type":"strong"}]}
+				]}
+			]}
+		}}],"isLast":true}`,
+	}
+	server := cloudPageServer(t, pages, nil)
+	defer server.Close()
+
+	epics, err := newCloudClient(t, server.URL).FetchEpics(context.Background(), "PROJ", "")
+	if err != nil {
+		t.Fatalf("FetchEpics: %v", err)
+	}
+	if len(epics) != 1 {
+		t.Fatalf("len(epics) = %d, want 1", len(epics))
+	}
+	if epics[0].Description != "Hello world" {
+		t.Errorf("description = %q, want %q (ADF flattened)", epics[0].Description, "Hello world")
+	}
+}
+
+func TestFetchEpics_Cloud_StringDescriptionStillWorks(t *testing.T) {
+	// Defensive: if a Cloud response ever carries a plain-string description, it
+	// must pass through unchanged (no panic, no empty string).
+	pages := []string{
+		`{"issues":[{"key":"PROJ-1","fields":{"summary":"S","status":{"name":"To Do"},"description":"plain text"}}],"isLast":true}`,
+	}
+	server := cloudPageServer(t, pages, nil)
+	defer server.Close()
+
+	epics, err := newCloudClient(t, server.URL).FetchEpics(context.Background(), "PROJ", "")
+	if err != nil {
+		t.Fatalf("FetchEpics: %v", err)
+	}
+	if len(epics) != 1 || epics[0].Description != "plain text" {
+		t.Fatalf("epics = %v, want description %q", epics, "plain text")
+	}
+}
+
+func TestFetchEpics_Cloud_JQLMatchesDataCenter(t *testing.T) {
+	// Shared JQL: Cloud must build the exact same JQL string as Data Center,
+	// including the NOT: prefix handling.
+	cases := []struct {
+		statusFilter string
+		wantJQL      string
+	}{
+		{"", `project = "PROJ" AND issuetype = Epic ORDER BY created DESC`},
+		{"Done", `project = "PROJ" AND issuetype = Epic AND status = "Done" ORDER BY created DESC`},
+		{"NOT:Done", `project = "PROJ" AND issuetype = Epic AND status != "Done" ORDER BY created DESC`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.statusFilter, func(t *testing.T) {
+			var gotJQL string
+			pages := []string{`{"issues":[],"isLast":true}`}
+			server := cloudPageServer(t, pages, &gotJQL)
+			defer server.Close()
+
+			if _, err := newCloudClient(t, server.URL).FetchEpics(context.Background(), "PROJ", tc.statusFilter); err != nil {
+				t.Fatalf("FetchEpics: %v", err)
+			}
+			if gotJQL != tc.wantJQL {
+				t.Errorf("Cloud JQL = %q, want %q", gotJQL, tc.wantJQL)
+			}
+		})
 	}
 }
