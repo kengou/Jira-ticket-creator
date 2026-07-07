@@ -171,7 +171,7 @@
     "@types/node": "^22.0.0",
     "@types/vscode": "^1.100.0",
     "@vscode/vsce": "^3.0.0",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.0",
     "eslint": "^10.5.0",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.61.1"
