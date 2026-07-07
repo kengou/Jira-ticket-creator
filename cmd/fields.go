@@ -72,7 +72,7 @@ func matchFields(fields []jira.Field) []jira.Field {
 func runFields() error {
 	fmt.Printf("Fetching fields from %s...\n\n", jiraURL)
 
-	client, err := jira.NewClient(jiraURL, jiraToken, isCloud)
+	client, err := newJiraClient()
 	if err != nil {
 		return fmt.Errorf("create Jira client: %w", err)
 	}

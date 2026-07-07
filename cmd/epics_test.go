@@ -128,6 +128,32 @@ func TestValidateEpicsFlags_MissingProjectKey(t *testing.T) {
 	}
 }
 
+func TestValidateEpicsFlags_RejectsConfigFile(t *testing.T) {
+	origURL := jiraURL
+	origToken := jiraToken
+	origProject := projectKey
+	origConfigFile := configFile
+	defer func() {
+		jiraURL = origURL
+		jiraToken = origToken
+		projectKey = origProject
+		configFile = origConfigFile
+	}()
+
+	jiraURL = testJiraURL
+	jiraToken = testJiraToken
+	projectKey = testProjectKey
+	configFile = "tickets/epics-new.yaml"
+
+	err := validateEpicsFlags()
+	if err == nil {
+		t.Fatal("expected error when -f/--file is passed to epics")
+	}
+	if !strings.Contains(err.Error(), "--output") {
+		t.Errorf("error should point to --output, got: %v", err)
+	}
+}
+
 // --- epicsToYAML ---
 
 func TestEpicsToYAML_BasicOutput(t *testing.T) {

@@ -49,6 +49,12 @@ func init() {
 
 // validateEpicsFlags checks that required flags for the epics command are set.
 func validateEpicsFlags() error {
+	// The global -f/--file flag is an input config for apply/validate/plan; the
+	// epics command writes output via -o/--output. Reject -f loudly so a mixed-up
+	// invocation doesn't silently fetch epics without writing any file.
+	if configFile != "" {
+		return fmt.Errorf("epics does not read a config file; did you mean --output/-o %s to save the epics to a YAML file?", configFile)
+	}
 	if err := requireAuth(); err != nil {
 		return err
 	}

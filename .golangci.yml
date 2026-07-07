@@ -73,6 +73,9 @@ linters:
 
   exclusions:
     generated: lax
+    paths:
+      # Vendored JS dependencies ship stray Go files (e.g. flatted); not our code.
+      - ^vscode-extension/
 
 
 issues:
@@ -87,3 +90,6 @@ formatters:
     goimports:
       local-prefixes:
         - github.com/kengou/jira-ticket-creator
+  exclusions:
+    paths:
+      - ^vscode-extension/

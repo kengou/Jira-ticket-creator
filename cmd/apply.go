@@ -132,11 +132,20 @@ func runApply() error {
 		if err != nil {
 			return fmt.Errorf("create Jira client: %w", err)
 		}
+
+		// Preflight: verify auth and project access before creating anything.
+		// Dry-run skips this entirely (no network), keeping dry-run offline.
+		fmt.Fprintf(os.Stderr, "%s Running preflight checks...\n", emoji("\U0001f50d", "[CHECK]"))
+		if err := runPreflight(context.Background(), c, resolvedMode, cfg.Defaults.ProjectKey); err != nil {
+			return fmt.Errorf("preflight failed: %w", err)
+		}
+
 		client = c
 	}
 
-	// Create applier
-	applier := apply.NewApplier(cfg, client, verbose, dryRun, configFile)
+	// Create applier — mode is the resolved platform mode (cmd/root.go); the
+	// applier derives cloud-ness and selects its field encoder from it.
+	applier := apply.NewApplier(cfg, client, resolvedMode, verbose, dryRun, configFile)
 
 	// Apply
 	if err := applier.Apply(context.Background()); err != nil {
@@ -167,5 +176,9 @@ func (dryRunClient) CreateIssue(_ context.Context, _ *jira.CreateIssueRequest) (
 func (dryRunClient) CreateIssueLink(_ context.Context, _ *jira.IssueLinkRequest) error { return nil }
 
 func (dryRunClient) FetchIssueLinkTypes(_ context.Context) ([]jira.IssueLinkTypeInfo, error) {
+	return nil, nil
+}
+
+func (dryRunClient) SearchUsers(_ context.Context, _ string) ([]jira.User, error) {
 	return nil, nil
 }

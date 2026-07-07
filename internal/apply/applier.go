@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -14,13 +16,21 @@ import (
 	"github.com/kengou/jira-ticket-creator/internal/config"
 	"github.com/kengou/jira-ticket-creator/internal/jira"
 	"github.com/kengou/jira-ticket-creator/internal/state"
+	"github.com/kengou/jira-ticket-creator/internal/ui"
 )
 
-// JiraClient is the subset of the Jira API used by Applier.
+// JiraClient is the apply package's broad "role" interface: it enumerates every
+// Jira API method the Applier needs, so a single dependency covers issue
+// creation, linking, link-type discovery, and user search. This wide shape is
+// intentional here because the Applier genuinely exercises all of it. Elsewhere,
+// prefer narrow consumer-local interfaces for single-purpose consumers (for
+// example cmd's preflightClient), which pin exactly the one or two methods that
+// caller uses and keep test doubles minimal.
 type JiraClient interface {
 	CreateIssue(ctx context.Context, req *jira.CreateIssueRequest) (*jira.CreateIssueResponse, error)
 	CreateIssueLink(ctx context.Context, req *jira.IssueLinkRequest) error
 	FetchIssueLinkTypes(ctx context.Context) ([]jira.IssueLinkTypeInfo, error)
+	SearchUsers(ctx context.Context, query string) ([]jira.User, error)
 }
 
 // Applier creates issues in Jira according to a configuration.
@@ -31,9 +41,23 @@ type Applier struct {
 	configFile string
 
 	// Options
+	mode            jira.Mode
+	enc             fieldEncoder // platform field-value encoder, selected from mode
 	verbose         bool
 	dryRun          bool
 	continueOnError bool
+
+	// degradedIssues collects internal IDs whose markup degraded during ADF
+	// conversion (Cloud mode only), for verbose reporting.
+	degradedIssues []string
+
+	// droppedEpicNames collects internal IDs whose epicName was dropped on Cloud
+	// (Cloud epics use the summary as their name), for verbose reporting.
+	droppedEpicNames []string
+
+	// userCache maps a resolved user reference (email) to its Cloud account ID,
+	// so each distinct email is looked up at most once per apply run (Cloud only).
+	userCache map[string]string
 
 	// Runtime state: internal ID -> Jira key
 	createdIssues map[string]string
@@ -41,8 +65,9 @@ type Applier struct {
 	epicIDs map[string]bool
 }
 
-// NewApplier creates a new Applier.
-func NewApplier(cfg *config.Config, client JiraClient, verbose, dryRun bool, configFile string) *Applier {
+// NewApplier creates a new Applier. mode is the resolved Jira platform mode; the
+// applier derives cloud-ness from it and selects the matching field encoder once.
+func NewApplier(cfg *config.Config, client JiraClient, mode jira.Mode, verbose, dryRun bool, configFile string) *Applier {
 	continueOnError := false
 	if cfg.Options != nil {
 		continueOnError = cfg.Options.ContinueOnError
@@ -59,10 +84,13 @@ func NewApplier(cfg *config.Config, client JiraClient, verbose, dryRun bool, con
 	return &Applier{
 		config:          cfg,
 		client:          client,
+		mode:            mode,
+		enc:             newFieldEncoder(mode),
 		verbose:         verbose,
 		dryRun:          dryRun,
 		continueOnError: continueOnError,
 		configFile:      configFile,
+		userCache:       make(map[string]string),
 		createdIssues:   make(map[string]string, len(cfg.Issues)),
 		epicIDs:         epicIDs,
 	}
@@ -122,6 +150,18 @@ func (a *Applier) Apply(ctx context.Context) error {
 		}
 	}
 
+	// Name issues whose markup degraded during ADF conversion (Cloud mode).
+	if a.verbose && len(a.degradedIssues) > 0 {
+		fmt.Fprintf(os.Stderr, "\n%s ADF conversion degraded markup for %d issue(s): %s\n",
+			ui.Emoji("⚠️", "[WARN]"), len(a.degradedIssues), strings.Join(a.degradedIssues, ", "))
+	}
+
+	// Note epicName values dropped on Cloud (Cloud epics use the summary as name).
+	if a.verbose && len(a.droppedEpicNames) > 0 {
+		fmt.Fprintf(os.Stderr, "\n%s epicName is unused on Jira Cloud; dropped for %d issue(s): %s\n",
+			ui.Emoji("ℹ️", "[INFO]"), len(a.droppedEpicNames), strings.Join(a.droppedEpicNames, ", "))
+	}
+
 	// Create issue links
 	if err := a.createIssueLinks(ctx); err != nil {
 		return fmt.Errorf("create issue links: %w", err)
@@ -175,7 +215,7 @@ func (a *Applier) createIssue(ctx context.Context, issue *config.Issue, index, t
 	}
 
 	// Build fields
-	fields, err := a.buildIssueFields(issue)
+	fields, err := a.buildIssueFields(ctx, issue)
 	if err != nil {
 		return false, fmt.Errorf("build fields: %w", err)
 	}
@@ -217,8 +257,9 @@ func (a *Applier) createIssue(ctx context.Context, issue *config.Issue, index, t
 	return false, nil
 }
 
-// buildIssueFields builds the Jira API fields map.
-func (a *Applier) buildIssueFields(issue *config.Issue) (map[string]any, error) {
+// buildIssueFields builds the Jira API fields map. It takes ctx because Cloud
+// user resolution (assignee/reporter) may perform user-search network calls.
+func (a *Applier) buildIssueFields(ctx context.Context, issue *config.Issue) (map[string]any, error) {
 	fields := make(map[string]any)
 
 	// Issue type
@@ -233,7 +274,14 @@ func (a *Applier) buildIssueFields(issue *config.Issue) (map[string]any, error) 
 		return nil, fmt.Errorf("render description: %w", err)
 	}
 	if desc != "" {
-		fields["description"] = desc
+		// The encoder shapes the value per platform: Cloud (API v3) emits an ADF
+		// document (recording degraded markup for verbose output); Data Center
+		// (API v2) passes the raw wiki-markup string through unchanged.
+		value, degraded := a.encoder().description(desc)
+		fields["description"] = value
+		if degraded {
+			a.degradedIssues = append(a.degradedIssues, issue.ID)
+		}
 	}
 
 	// Priority
@@ -241,14 +289,24 @@ func (a *Applier) buildIssueFields(issue *config.Issue) (map[string]any, error) 
 		fields["priority"] = jira.FormatPriority(priority)
 	}
 
-	// Assignee
+	// Assignee — resolved per platform (Cloud: email→accountId; DC: {"name":...}).
 	if assignee := a.config.EffectiveAssignee(issue); assignee != nil {
-		fields["assignee"] = jira.FormatUser(*assignee)
+		resolved, err := a.resolveUserField(ctx, *assignee)
+		if err != nil {
+			return nil, fmt.Errorf("resolve assignee: %w", err)
+		}
+		fields["assignee"] = resolved
 	}
 
-	// Reporter
+	// Reporter — resolved per platform. A Cloud project-permission rejection of
+	// the reporter field surfaces later as the raw *jira.APIError from CreateIssue
+	// (no automatic retry-without-reporter).
 	if reporter := a.config.EffectiveReporter(issue); reporter != "" {
-		fields["reporter"] = jira.FormatUser(reporter)
+		resolved, err := a.resolveUserField(ctx, reporter)
+		if err != nil {
+			return nil, fmt.Errorf("resolve reporter: %w", err)
+		}
+		fields["reporter"] = resolved
 	}
 
 	// Labels
@@ -274,10 +332,13 @@ func (a *Applier) buildIssueFields(issue *config.Issue) (map[string]any, error) 
 		fields["fixVersions"] = versionList
 	}
 
-	// Parent (for sub-tasks) or Epic Link (for stories/tasks under epics)
-	// On Jira Data Center, the "parent" field only works for sub-task types.
-	// When a non-sub-task (Story, Task, Bug) references an Epic as parent,
-	// automatically use the epic link custom field instead.
+	// Parent / Epic Link translation.
+	// Data Center: the "parent" field only works for sub-task types, so a
+	// non-sub-task referencing an Epic parent is routed through the epic-link
+	// custom field, and epicLink/epicName go to their custom field IDs.
+	// Cloud: the unified "parent" field works uniformly, so epic parents and
+	// epicLink both emit parent:{key:...}, and epicName is dropped entirely
+	// (Cloud epics use the summary as their name).
 	if issue.Parent != "" {
 		parentKey, ok := a.createdIssues[issue.Parent]
 		if !ok {
@@ -285,30 +346,98 @@ func (a *Applier) buildIssueFields(issue *config.Issue) (map[string]any, error) 
 				issue.ID, issue.Parent)
 		}
 		if a.epicIDs[issue.Parent] {
-			// Parent is an Epic → use epic link custom field
-			fields[a.getEpicLinkFieldID()] = parentKey
+			// An epic parent: the encoder decides the shape — Cloud uses the
+			// unified parent field, Data Center the epic-link custom field.
+			a.encoder().epicParent(fields, parentKey, a.getEpicLinkFieldID())
 		} else {
-			// Parent is a regular issue → use parent field (sub-tasks)
+			// Regular (non-epic) parent → parent field (sub-tasks) on both platforms.
 			fields["parent"] = map[string]any{"key": parentKey}
 		}
 	}
 
-	// Epic name (required for Epic issue type)
+	// Epic name (required for Epic issue type on Data Center; dropped on Cloud,
+	// where epics use the summary as their name). The encoder writes the field
+	// (Data Center) or reports the drop, which we record for verbose output.
 	if strings.EqualFold(a.config.EffectiveIssueType(issue), "Epic") && issue.EpicName != "" {
-		fields[a.getEpicNameFieldID()] = issue.EpicName
+		if dropped := a.encoder().epicName(fields, issue.EpicName, a.getEpicNameFieldID()); dropped {
+			a.droppedEpicNames = append(a.droppedEpicNames, issue.ID)
+		}
 	}
 
-	// Epic link (link to existing epic) — Jira Data Center expects a plain string (the epic key)
+	// Epic link (link to an epic). EpicLink can be either an explicit key (e.g.,
+	// "POM-945") or an internal ID (e.g., "epic-1"). Only Cloud resolves an
+	// internal ID to its created key (behavior — not shape — differs here, so
+	// this is a mode check, not an encoder concern); Data Center uses the raw
+	// value verbatim to preserve its byte-for-byte payload. The encoder then
+	// shapes the resolved key — Data Center writes the epic-link custom field,
+	// Cloud uses the unified parent field.
 	if issue.EpicLink != "" {
-		fields[a.getEpicLinkFieldID()] = issue.EpicLink
+		epicKey := issue.EpicLink
+		if a.mode == jira.ModeCloud {
+			if createdKey, ok := a.createdIssues[issue.EpicLink]; ok {
+				epicKey = createdKey
+			}
+		}
+		a.encoder().epicLink(fields, epicKey, a.getEpicLinkFieldID())
 	}
 
 	// Custom fields
-	for k, v := range a.config.EffectiveCustomFields(issue) {
-		fields[k] = v
-	}
+	maps.Copy(fields, a.config.EffectiveCustomFields(issue))
 
 	return jira.BuildIssueFields(a.config.Defaults.ProjectKey, fields), nil
+}
+
+// resolveUserField converts a user reference (from assignee/reporter config) into
+// the Jira API field value for the current platform.
+//
+// Data Center: always {"name": value} — byte-for-byte identical to prior behavior;
+// no lookup is ever performed.
+//
+// Cloud: an email-shaped value (contains "@") is resolved to a Cloud account ID
+// via SearchUsers and returned as {"id": accountId}; each distinct email is looked
+// up at most once per run (userCache). A value that is not email-shaped is treated
+// as an already-resolved account ID and returned as {"id": value} with no lookup.
+// A lookup returning zero matches fails with a "not found" error naming the value;
+// two or more matches fails with an "ambiguous" error naming the value. In dry-run,
+// no lookup is performed: an email yields {"id": value} (the raw email) so that
+// field summaries still render without any network call.
+func (a *Applier) resolveUserField(ctx context.Context, value string) (map[string]any, error) {
+	// Whether we resolve users at all is a behavior difference (Data Center never
+	// looks a user up), so it stays a mode check on the one stored field. The
+	// final VALUE SHAPE, however, is delegated to the encoder's userRef.
+	if a.mode != jira.ModeCloud {
+		return a.encoder().userRef(value), nil
+	}
+
+	// Cloud: values that don't look like emails are already account IDs.
+	if !strings.Contains(value, "@") {
+		return a.encoder().userRef(value), nil
+	}
+
+	// Dry-run performs no lookups; keep the field id-shaped for summaries.
+	if a.dryRun {
+		return a.encoder().userRef(value), nil
+	}
+
+	// Per-run cache: look up each distinct email at most once.
+	if accountID, ok := a.userCache[value]; ok {
+		return a.encoder().userRef(accountID), nil
+	}
+
+	users, err := a.client.SearchUsers(ctx, value)
+	if err != nil {
+		return nil, fmt.Errorf("user search for %q: %w", value, err)
+	}
+	switch len(users) {
+	case 0:
+		return nil, fmt.Errorf("user %q not found among Cloud users", value)
+	case 1:
+		accountID := users[0].AccountID
+		a.userCache[value] = accountID
+		return a.encoder().userRef(accountID), nil
+	default:
+		return nil, fmt.Errorf("user %q is ambiguous across multiple Cloud users (%d matches)", value, len(users))
+	}
 }
 
 // renderDescription renders the description using template if configured.
@@ -331,9 +460,7 @@ func (a *Applier) renderDescription(issue *config.Issue) (string, error) {
 	// Build variables map
 	vars := make(map[string]string)
 	vars["summary"] = issue.Summary
-	for k, v := range issue.TemplateVars {
-		vars[k] = v
-	}
+	maps.Copy(vars, issue.TemplateVars)
 
 	// Two-pass placeholder replacement to prevent overlap injection.
 	// Pass 1: Replace all {key} placeholders with unique sentinel tokens.
@@ -448,7 +575,13 @@ func (a *Applier) createIssueLinks(ctx context.Context) error {
 			}
 
 			if link.Comment != "" {
-				req.Comment = &jira.LinkComment{Body: link.Comment}
+				// The encoder shapes the comment body per platform (Cloud ADF vs
+				// Data Center raw string) and reports degraded markup for verbose output.
+				body, degraded := a.encoder().linkComment(link.Comment)
+				req.Comment = &jira.LinkComment{Body: body}
+				if degraded {
+					a.degradedIssues = append(a.degradedIssues, issue.ID)
+				}
 			}
 
 			if err := a.client.CreateIssueLink(ctx, req); err != nil {
